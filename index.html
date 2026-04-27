@@ -1349,122 +1349,32 @@ const Seed = {
       { id: 'U-071', name: 'باسم نزار (مشرف صيانة)', nameEn: 'Basim N. (Maint Sup)',dept: 'MAINT', role: 'مشرف صيانة',         roleEn: 'Maint Supervisor',avatar: 'ب', color: '#f43f5e' },
     ];
 
-    // Stations — each station has a primary operator from PROD dept
     const stations = [
-      { id: 'K1', code: 'K1', name: 'تجليد 2UPs',                nameEn: '2UPs Binding',          operatorId: 'U-021', status: 'running',     currentWO: 'WO-2026-0042', target: 5000, produced: 3240, scrap: 18, startedAt: h(4) },
-      { id: 'K2', code: 'K2', name: 'تغليف الغلاف',              nameEn: 'Cover Lamination',      operatorId: 'U-022', status: 'running',     currentWO: 'WO-2026-0042', target: 3240, produced: 2890, scrap: 12, startedAt: h(3.2) },
-      { id: 'K3', code: 'K3', name: 'النقش الذهبي والقطع',      nameEn: 'Gold Embossing',        operatorId: 'U-023', status: 'idle',        currentWO: null,           target: 0,    produced: 0,    scrap: 0,  startedAt: null },
-      { id: 'K4', code: 'K4', name: 'التشخيص المبدئي للكتيب',   nameEn: 'Booklet Pre-Person',    operatorId: 'U-024', status: 'maintenance', currentWO: null,           target: 0,    produced: 0,    scrap: 0,  startedAt: null },
-      { id: 'MOC',code: 'MOC',name: 'فحص نهاية الإنتاج',         nameEn: 'Product End Control',   operatorId: 'U-030', status: 'running',     currentWO: 'WO-2026-0041', target: 4500, produced: 4500, scrap: 22, startedAt: h(8) },
+      { id: 'K1', code: 'K1', name: 'تجليد 2UPs',                nameEn: '2UPs Binding',          operatorId: 'U-021', status: 'idle', currentWO: null, target: 0, produced: 0, scrap: 0, startedAt: null },
+      { id: 'K2', code: 'K2', name: 'تغليف الغلاف',              nameEn: 'Cover Lamination',      operatorId: 'U-022', status: 'idle', currentWO: null, target: 0, produced: 0, scrap: 0, startedAt: null },
+      { id: 'K3', code: 'K3', name: 'النقش الذهبي والقطع',      nameEn: 'Gold Embossing',        operatorId: 'U-023', status: 'idle', currentWO: null, target: 0, produced: 0, scrap: 0, startedAt: null },
+      { id: 'K4', code: 'K4', name: 'التشخيص المبدئي للكتيب',   nameEn: 'Booklet Pre-Person',    operatorId: 'U-024', status: 'idle', currentWO: null, target: 0, produced: 0, scrap: 0, startedAt: null },
+      { id: 'MOC',code: 'MOC',name: 'فحص نهاية الإنتاج',         nameEn: 'Product End Control',   operatorId: 'U-030', status: 'idle', currentWO: null, target: 0, produced: 0, scrap: 0, startedAt: null },
     ];
 
     const warehouses = [
       { id: 'WH-RAW', code: 'RAW', dept: 'RAW', name: 'المواد الخام',  nameEn: 'Raw Materials', managerId: 'U-010', items: [
-        { sku: 'PC-COVER-A', name: 'غلاف بولي كاربونات',   qty: 18420, unit: 'pcs',  allocated: 5000 },
-        { sku: 'GOLD-FOIL',  name: 'فويل ذهبي',           qty: 2400,  unit: 'roll', allocated: 800 },
-        { sku: 'INK-BLK-01', name: 'حبر أسود',             qty: 850,   unit: 'L',    allocated: 120 },
-        { sku: 'CHIP-RFID',  name: 'شريحة RFID',           qty: 22000, unit: 'pcs',  allocated: 5000 },
+        { sku: 'PC-COVER-A', name: 'غلاف بولي كاربونات',   qty: 18420, unit: 'pcs',  allocated: 0 },
+        { sku: 'GOLD-FOIL',  name: 'فويل ذهبي',           qty: 2400,  unit: 'roll', allocated: 0 },
+        { sku: 'INK-BLK-01', name: 'حبر أسود',             qty: 850,   unit: 'L',    allocated: 0 },
+        { sku: 'CHIP-RFID',  name: 'شريحة RFID',           qty: 22000, unit: 'pcs',  allocated: 0 },
       ]},
       { id: 'WH-IFA', code: 'IFA', dept: 'IFA', name: 'IFA — شبه نهائي', nameEn: 'IFA Semi-finished', managerId: 'U-040', items: [
-        { sku: 'BLANK-001', name: 'بطاقة فارغة', qty: 12500, unit: 'pcs', allocated: 4500 },
+        { sku: 'BLANK-001', name: 'بطاقة فارغة', qty: 0, unit: 'pcs', allocated: 0 },
       ]},
-      { id: 'WH-PMF', code: 'PMF', dept: 'PMF', name: 'PMF — منتج نهائي', nameEn: 'PMF Finished',     managerId: 'U-050', items: [
-        { sku: 'CARD-040', name: 'دفعة 040 جاهزة', qty: 4480, unit: 'pcs', allocated: 0 },
-      ]},
-      { id: 'WH-GDN', code: 'GDN', dept: 'GDN', name: 'GDN — توزيع',      nameEn: 'GDN Distribution', managerId: 'U-060', items: [
-        { sku: 'CARD-039', name: 'دفعة 039 موزعة', qty: 0, unit: 'pcs', allocated: 0 },
-      ]},
+      { id: 'WH-PMF', code: 'PMF', dept: 'PMF', name: 'PMF — منتج نهائي', nameEn: 'PMF Finished',     managerId: 'U-050', items: []},
+      { id: 'WH-GDN', code: 'GDN', dept: 'GDN', name: 'GDN — توزيع',      nameEn: 'GDN Distribution', managerId: 'U-060', items: []},
     ];
 
-    // Work Orders with full history
+    // Empty operational data — system starts clean, ready for production
     const WOs = [];
-    const mkHist = (stage, fromUser, toUser, ts, qty=null, scrap=0, notes='') => ({
-      stage, action: 'handover', fromUser, toUser, qty, scrap, ts, notes
-    });
-
-    WOs.push({
-      id: 'WO-2026-0042', sku: 'CARD-NID-042', desc: 'بطاقة وطنية - دفعة 042',
-      qty: 5000, currentStage: 'AT_K1', currentOwner: 'U-021', priority: 'high',
-      createdBy: 'U-020', createdAt: h(5),
-      produced: 3240, scrap: 30,
-      history: [
-        { stage: 'CREATED',     action: 'create',   fromUser: null,    toUser: 'U-020', qty: 5000, scrap: 0, ts: h(5),   notes: 'WO أنشئ' },
-        { stage: 'MAT_REQUEST', action: 'request',  fromUser: 'U-020', toUser: 'U-010', qty: 5000, scrap: 0, ts: h(4.8), notes: 'طلب مواد للإنتاج' },
-        { stage: 'MAT_ISSUED',  action: 'issue',    fromUser: 'U-010', toUser: 'U-021', qty: 5000, scrap: 0, ts: h(4.5), notes: 'صرف PC + RFID + Foil' },
-        { stage: 'AT_K1',       action: 'start',    fromUser: 'U-021', toUser: 'U-021', qty: 5000, scrap: 0, ts: h(4),   notes: 'بدء تجليد K1' },
-      ]
-    });
-
-    WOs.push({
-      id: 'WO-2026-0041', sku: 'CARD-NID-041', desc: 'بطاقة وطنية - دفعة 041',
-      qty: 4500, currentStage: 'AT_MOC', currentOwner: 'U-030', priority: 'high',
-      createdBy: 'U-020', createdAt: h(14),
-      produced: 4478, scrap: 22,
-      history: [
-        { stage: 'CREATED',     action: 'create',   fromUser: null,    toUser: 'U-020', qty: 4500, scrap: 0, ts: h(14),   notes: '' },
-        { stage: 'MAT_REQUEST', action: 'request',  fromUser: 'U-020', toUser: 'U-010', qty: 4500, scrap: 0, ts: h(13.5), notes: '' },
-        { stage: 'MAT_ISSUED',  action: 'issue',    fromUser: 'U-010', toUser: 'U-021', qty: 4500, scrap: 0, ts: h(13),   notes: '' },
-        { stage: 'AT_K1',       action: 'start',    fromUser: 'U-021', toUser: 'U-021', qty: 4500, scrap: 8, ts: h(12.5), notes: '' },
-        { stage: 'AT_K2',       action: 'handover', fromUser: 'U-021', toUser: 'U-022', qty: 4492, scrap: 0, ts: h(11),   notes: 'نسبة قبول 99.8%' },
-        { stage: 'AT_K3',       action: 'handover', fromUser: 'U-022', toUser: 'U-023', qty: 4490, scrap: 2, ts: h(9.5),  notes: '' },
-        { stage: 'AT_K4',       action: 'handover', fromUser: 'U-023', toUser: 'U-024', qty: 4485, scrap: 5, ts: h(8.5),  notes: '' },
-        { stage: 'AT_MOC',      action: 'handover', fromUser: 'U-024', toUser: 'U-030', qty: 4478, scrap: 7, ts: h(8),    notes: 'في انتظار MOC' },
-      ]
-    });
-
-    WOs.push({
-      id: 'WO-2026-0040', sku: 'CARD-NID-040', desc: 'بطاقة وطنية - دفعة 040',
-      qty: 4500, currentStage: 'AT_PMF', currentOwner: 'U-050', priority: 'medium',
-      createdBy: 'U-020', createdAt: h(36),
-      produced: 4480, scrap: 20,
-      history: [
-        { stage: 'CREATED',     action: 'create',   fromUser: null,    toUser: 'U-020', qty: 4500, scrap: 0, ts: h(36) },
-        { stage: 'MAT_ISSUED',  action: 'issue',    fromUser: 'U-010', toUser: 'U-021', qty: 4500, scrap: 0, ts: h(35) },
-        { stage: 'AT_K4',       action: 'handover', fromUser: 'U-023', toUser: 'U-024', qty: 4490, scrap: 10, ts: h(20) },
-        { stage: 'AT_MOC',      action: 'handover', fromUser: 'U-024', toUser: 'U-030', qty: 4485, scrap: 5, ts: h(18) },
-        { stage: 'AT_PMF',      action: 'accept',   fromUser: 'U-030', toUser: 'U-050', qty: 4480, scrap: 5, ts: h(16),   notes: 'قبول MOC، نقل PMF' },
-      ]
-    });
-
-    WOs.push({
-      id: 'WO-2026-0039', sku: 'CARD-NID-039', desc: 'بطاقة وطنية - دفعة 039',
-      qty: 4500, currentStage: 'DELIVERED', currentOwner: null, priority: 'medium',
-      createdBy: 'U-020', createdAt: h(72),
-      produced: 4470, scrap: 30,
-      history: [
-        { stage: 'CREATED',     action: 'create',   fromUser: null,    toUser: 'U-020', qty: 4500, ts: h(72) },
-        { stage: 'AT_MOC',      action: 'handover', fromUser: 'U-024', toUser: 'U-030', qty: 4485, ts: h(48) },
-        { stage: 'AT_PMF',      action: 'accept',   fromUser: 'U-030', toUser: 'U-050', qty: 4480, ts: h(40) },
-        { stage: 'AT_GDN',      action: 'transfer', fromUser: 'U-050', toUser: 'U-060', qty: 4470, ts: h(20) },
-        { stage: 'DELIVERED',   action: 'deliver',  fromUser: 'U-060', toUser: null,    qty: 4470, ts: h(2), notes: 'تسليم لمكاتب الإصدار' },
-      ]
-    });
-
-    WOs.push({
-      id: 'WO-2026-0043', sku: 'CARD-NID-043', desc: 'بطاقة وطنية - دفعة 043',
-      qty: 5000, currentStage: 'CREATED', currentOwner: 'U-020', priority: 'medium',
-      createdBy: 'U-020', createdAt: h(0.3),
-      produced: 0, scrap: 0,
-      history: [
-        { stage: 'CREATED', action: 'create', fromUser: null, toUser: 'U-020', qty: 5000, scrap: 0, ts: h(0.3), notes: 'WO جديد، بانتظار طلب المواد' },
-      ]
-    });
-
-    const maintenance = [
-      { id: 'MR-001', stationId: 'K4', requestedBy: 'U-024', assignedTo: 'U-070', status: 'in_progress', priority: 'high',
-        title: 'عطل في وحدة التشخيص', desc: 'صوت غير طبيعي + بطء قراءة الشريحة', requestedAt: h(6), startedAt: h(5) },
-      { id: 'MR-002', stationId: 'K2', requestedBy: 'U-022', assignedTo: 'U-070', status: 'completed', priority: 'low',
-        title: 'صيانة دورية', desc: 'تنظيف + تشحيم', requestedAt: h(48), completedAt: h(40) },
-    ];
-
-    const movements = [
-      { id: uid('MV'), ts: h(0.1), type: 'info',    msg: 'WO-2026-0043 تم إنشاؤه',        user: 'U-020', userName: 'أحمد كريم' },
-      { id: uid('MV'), ts: h(0.5), type: 'ok',      msg: 'K1 → K2 تم تسليم 4492 قطعة',    user: 'U-021', userName: 'علي محمد' },
-      { id: uid('MV'), ts: h(1.2), type: 'ok',      msg: 'MOC قبل دفعة 040 (4480 قطعة)', user: 'U-030', userName: 'حسن نوري' },
-      { id: uid('MV'), ts: h(2.5), type: 'warn',    msg: 'تجاوز نسبة Scrap في K3 (1.2%)', user: 'U-023', userName: 'حيدر زين' },
-      { id: uid('MV'), ts: h(5),   type: 'err',     msg: 'K4 توقف للصيانة',              user: 'U-024', userName: 'نوار سلام' },
-      { id: uid('MV'), ts: h(8),   type: 'info',    msg: 'صرف 5000 قطعة من Raw للإنتاج',  user: 'U-010', userName: 'سعد فاضل' },
-    ];
+    const maintenance = [];
+    const movements = [];
 
     return {
       meta: { version: '1.0', initialized: now() },
@@ -1473,13 +1383,11 @@ const Seed = {
       maintenance,
       movements,
       audit: [
-        { id: uid('AUD'), ts: h(0.1), user: 'U-020', userName: 'أحمد كريم', action: 'create_wo', entity: 'WorkOrder', entityId: 'WO-2026-0043', details: { qty: 5000 } },
-        { id: uid('AUD'), ts: h(1.2), user: 'U-030', userName: 'حسن نوري',  action: 'moc_accept', entity: 'WorkOrder', entityId: 'WO-2026-0040', details: { accepted: 4480, rejected: 5 } },
+        { id: uid('AUD'), ts: now(), user: 'system', userName: 'النظام', action: 'system_init', entity: 'System', entityId: 'init', details: { note: 'تهيئة النظام بدون بيانات تجريبية' } },
       ],
     };
   }
 };
-
 /* ============ HELPERS ============ */
 const Q = {
   user(id) { return State.data.users.find(u => u.id === id); },
@@ -3475,6 +3383,16 @@ const Action = {
           <div class="field"><label>${ar?'المعرّف ID':'User ID'} <span class="req">*</span></label><input id="usrId" value="${u?u.id:('U-'+String(State.data.users.length*10+100).padStart(3,'0'))}" ${u?'readonly':''} class="mono"></div>
           <div class="field"><label>${ar?'الحرف الأول':'Avatar Letter'}</label><input id="usrAvatar" maxlength="2" value="${u?u.avatar:''}" placeholder="${ar?'أ':'A'}"></div>
         </div>
+        ${isNew ? `
+        <div style="background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:9px;padding:11px;margin:2px 0">
+          <div style="font-size:11.5px;color:var(--sky);font-weight:600;margin-bottom:8px">🔐 ${ar?'بيانات تسجيل الدخول':'Login Credentials'}</div>
+          <div class="form-row">
+            <div class="field"><label>${ar?'الإيميل':'Email'} <span class="req">*</span></label><input type="email" id="usrEmail" placeholder="name@veridos.iq" autocomplete="off"></div>
+            <div class="field"><label>${ar?'كلمة السر المؤقتة':'Temp Password'} <span class="req">*</span></label><input type="text" id="usrPassword" placeholder="${ar?'8 أحرف على الأقل':'min 8 chars'}" minlength="8" autocomplete="off"></div>
+          </div>
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:6px">${ar?'سيتم إنشاء حساب Supabase تلقائياً. أبلغ الموظف بكلمة السر ليغيّرها عند أول دخول.':'Supabase account will be auto-created. Share password with the employee.'}</div>
+        </div>
+        ` : ''}
         <div class="form-row">
           <div class="field"><label>${ar?'الاسم بالعربي':'Name (AR)'} <span class="req">*</span></label><input id="usrName" value="${u?escapeHTML(u.name):''}"></div>
           <div class="field"><label>${ar?'الاسم بالإنجليزي':'Name (EN)'} <span class="req">*</span></label><input id="usrNameEn" value="${u?escapeHTML(u.nameEn):''}"></div>
@@ -3491,34 +3409,100 @@ const Action = {
     `;
     App.openModal(isNew ? (ar?'مستخدم جديد':'New User') : (ar?'تعديل المستخدم':'Edit User'), body,
       `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
-       <button class="btn btn-primary" onclick="Action.saveUser('${id||''}')">${t('save')}</button>`);
+       <button class="btn btn-primary" id="saveUserBtn" onclick="Action.saveUser('${id||''}')">${t('save')}</button>`, true);
   },
-  saveUser(existingId) {
+
+  async saveUser(existingId) {
     if (!Perm.isManager()) return;
     const ar = State.lang === 'ar';
-    const get = (id) => document.getElementById(id).value.trim();
+    const get = (id) => (document.getElementById(id)?.value || '').trim();
     const id = get('usrId'), name = get('usrName'), nameEn = get('usrNameEn');
     if (!id || !name || !nameEn) { toast(ar?'املأ الحقول المطلوبة':'Fill required fields','error'); return; }
-    const data = { id, name, nameEn,
-      avatar: get('usrAvatar') || name.charAt(0),
-      dept: get('usrDept'), color: get('usrColor') || '#888',
-      role: get('usrRole') || '—', roleEn: get('usrRoleEn') || '—' };
+
+    const dept = get('usrDept'), color = get('usrColor') || '#888';
+    const avatar = get('usrAvatar') || name.charAt(0);
+    const role = get('usrRole') || '—', roleEn = get('usrRoleEn') || '—';
+
+    // EDIT MODE — local update only (Phase 1.4b will sync to Supabase)
     if (existingId) {
       const u = Q.user(existingId);
       if (!u) return;
-      Object.assign(u, data);
-      Audit.log('edit_user', 'User', id, { changes: Object.keys(data) });
+      Object.assign(u, { id, name, nameEn, avatar, dept, color, role, roleEn });
+      Audit.log('edit_user', 'User', id, { fields: 'name/dept/role' });
       Movements.add('info', `${ar?'تم تعديل المستخدم':'User edited'} ${name}`, { userId: id });
-    } else {
-      if (State.data.users.find(x => x.id === id)) { toast(ar?'المعرّف موجود مسبقاً':'ID already exists','error'); return; }
-      State.data.users.push(data);
-      Audit.log('create_user', 'User', id, { name, dept: data.dept });
-      Movements.add('info', `${ar?'مستخدم جديد:':'New user:'} ${name}`, { userId: id });
+      State.save();
+      App.closeModal();
+      toast(ar?'تم الحفظ':'Saved','success');
+      View.adminUsers();
+      return;
     }
-    State.save();
-    App.closeModal();
-    toast(ar?'تم الحفظ':'Saved','success');
-    View.adminUsers();
+
+    // CREATE MODE — call Edge Function to create Supabase Auth user + link to public.users
+    const email = get('usrEmail'), password = get('usrPassword');
+    if (!email || !password) {
+      toast(ar?'الإيميل وكلمة السر مطلوبان':'Email and password required','error');
+      return;
+    }
+    if (password.length < 8) {
+      toast(ar?'كلمة السر يجب 8 أحرف على الأقل':'Password must be 8+ chars','error');
+      return;
+    }
+    if (State.data.users.find(x => x.id === id)) {
+      toast(ar?'المعرّف موجود مسبقاً':'ID already exists','error');
+      return;
+    }
+
+    if (!sb) {
+      toast(ar?'Supabase غير مهيّأ — لا يمكن إنشاء حساب':'Supabase not configured','error');
+      return;
+    }
+
+    const btn = document.getElementById('saveUserBtn');
+    if (btn) { btn.disabled = true; btn.textContent = ar?'...جاري الإنشاء':'Creating...'; }
+
+    try {
+      // Get current session token to authorize Edge Function call
+      const { data: { session } } = await sb.auth.getSession();
+      if (!session) throw new Error(ar?'انتهت الجلسة':'Session expired');
+
+      const fnUrl = SUPABASE_CONFIG.url.replace(/\/$/,'') + '/functions/v1/create-user';
+      const response = await fetch(fnUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_CONFIG.anonKey,
+        },
+        body: JSON.stringify({
+          id, email, password,
+          name_ar: name, name_en: nameEn,
+          dept_id: dept,
+          role_ar: role, role_en: roleEn,
+          color, avatar
+        })
+      });
+
+      const result = await response.json();
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || `HTTP ${response.status}`);
+      }
+
+      // Add to local state too so UI updates immediately
+      State.data.users.push({
+        id, name, nameEn, dept, color, avatar, role, roleEn,
+        auth_user_id: result.auth_uuid, active: true
+      });
+      Audit.log('create_user', 'User', id, { name, dept, email });
+      Movements.add('info', `${ar?'مستخدم جديد:':'New user:'} ${name} (${email})`, { userId: id });
+      State.save();
+
+      App.closeModal();
+      toast(ar?`تم إنشاء ${name} ✓ كلمة السر: ${password}`:`Created ${name} ✓`, 'success');
+      View.adminUsers();
+    } catch (e) {
+      toast((ar?'فشل الإنشاء: ':'Create failed: ') + (e.message || String(e)), 'error');
+      if (btn) { btn.disabled = false; btn.textContent = t('save'); }
+    }
   },
   deleteUser(id) {
     if (!Perm.isManager()) return;
