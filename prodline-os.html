@@ -1,0 +1,2945 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ProdLine OS — نظام مراقبة خط الإنتاج</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root {
+  --bg-0: #060912;
+  --bg-1: #0b1020;
+  --bg-2: #131a2e;
+  --bg-3: #1a2340;
+  --glass: rgba(255,255,255,0.04);
+  --glass-2: rgba(255,255,255,0.07);
+  --glass-3: rgba(255,255,255,0.10);
+  --border: rgba(255,255,255,0.08);
+  --border-2: rgba(255,255,255,0.14);
+  --text: #e9eef7;
+  --text-2: #a8b3c5;
+  --text-3: #6c7689;
+  --gold: #f5b942;
+  --gold-2: #d4941f;
+  --emerald: #10b981;
+  --emerald-2: #059669;
+  --rose: #f43f5e;
+  --sky: #38bdf8;
+  --violet: #a78bfa;
+  --amber: #f59e0b;
+  --teal: #14b8a6;
+  --shadow: 0 10px 40px -10px rgba(0,0,0,0.6);
+  --r: 12px;
+  --r-sm: 8px;
+  --r-lg: 16px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: 'Cairo', 'Inter', system-ui, sans-serif;
+  background: var(--bg-0);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+body[data-lang="en"] { font-family: 'Inter', 'Cairo', sans-serif; direction: ltr; }
+.mono { font-family: 'JetBrains Mono', monospace; font-feature-settings: 'tnum' 1; letter-spacing: -0.01em; }
+button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+input, select, textarea { font-family: inherit; }
+a { color: inherit; text-decoration: none; }
+
+body::before {
+  content: ''; position: fixed; inset: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 20% 0%, rgba(245,185,66,0.07), transparent 50%),
+    radial-gradient(ellipse 60% 50% at 80% 100%, rgba(56,189,248,0.06), transparent 50%),
+    radial-gradient(ellipse 70% 50% at 50% 50%, rgba(167,139,250,0.04), transparent 60%);
+  pointer-events: none; z-index: 0;
+}
+
+#app { position: relative; z-index: 1; height: 100vh; display: flex; flex-direction: column; }
+
+/* ============ TOPBAR ============ */
+.topbar {
+  height: 58px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 22px;
+  background: rgba(7,11,20,0.75);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  z-index: 50;
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand-mark {
+  width: 32px; height: 32px;
+  background: linear-gradient(135deg, var(--gold), var(--gold-2));
+  border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; color: #1a1208; font-size: 15px;
+  box-shadow: 0 4px 14px rgba(245,185,66,0.35);
+}
+.brand-name { font-weight: 700; font-size: 14px; letter-spacing: -0.01em; }
+.brand-sub { font-size: 11px; color: var(--text-3); margin-top: -2px; }
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+.icon-btn {
+  width: 34px; height: 34px;
+  border-radius: 9px;
+  background: var(--glass); border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-2); transition: all 0.15s; position: relative;
+}
+.icon-btn:hover { background: var(--glass-2); color: var(--text); border-color: var(--border-2); }
+.icon-btn svg { width: 16px; height: 16px; }
+.icon-btn .dot {
+  position: absolute; top: 5px; inset-inline-end: 5px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--rose); box-shadow: 0 0 0 2px var(--bg-0);
+}
+.lang-toggle {
+  height: 34px; padding: 0 12px;
+  border-radius: 9px;
+  background: var(--glass); border: 1px solid var(--border);
+  font-weight: 700; font-size: 11px; color: var(--text-2);
+  transition: all 0.15s;
+}
+.lang-toggle:hover { background: var(--glass-2); color: var(--text); }
+.user-chip {
+  display: flex; align-items: center; gap: 9px;
+  height: 34px; padding-inline: 4px 12px;
+  background: var(--glass); border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.user-avatar {
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 11px; color: white;
+  flex-shrink: 0;
+}
+.user-info { font-size: 11.5px; line-height: 1.25; }
+.user-info .role { color: var(--text-3); font-size: 10px; }
+.logout-btn {
+  height: 34px; padding: 0 12px; border-radius: 9px;
+  background: rgba(244,63,94,0.1); color: var(--rose);
+  border: 1px solid rgba(244,63,94,0.2);
+  font-weight: 600; font-size: 11px;
+  transition: all 0.15s;
+}
+.logout-btn:hover { background: rgba(244,63,94,0.18); }
+
+/* ============ LAYOUT ============ */
+.main { flex: 1; display: grid; grid-template-columns: 230px 1fr; overflow: hidden; }
+
+.sidebar {
+  background: rgba(11,16,32,0.5);
+  backdrop-filter: blur(18px);
+  border-inline-end: 1px solid var(--border);
+  padding: 16px 11px;
+  overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+.nav-group { margin-bottom: 16px; }
+.nav-group-title {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-3); padding: 0 9px; margin-bottom: 6px; font-weight: 700;
+}
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 9px;
+  color: var(--text-2); font-weight: 500; font-size: 12.5px;
+  transition: all 0.15s; width: 100%; text-align: start; margin-bottom: 2px;
+  border: 1px solid transparent;
+}
+.nav-item:hover { background: var(--glass); color: var(--text); }
+.nav-item.active {
+  background: linear-gradient(135deg, rgba(245,185,66,0.15), rgba(245,185,66,0.04));
+  color: var(--gold);
+  border-color: rgba(245,185,66,0.2);
+}
+.nav-item.disabled { opacity: 0.35; cursor: not-allowed; }
+.nav-item svg { width: 16px; height: 16px; flex-shrink: 0; }
+.nav-item .badge {
+  margin-inline-start: auto;
+  background: var(--glass-2); font-size: 10px;
+  padding: 2px 6px; border-radius: 5px; font-weight: 700;
+  font-family: 'JetBrains Mono', monospace; min-width: 20px; text-align: center;
+}
+.nav-item.active .badge { background: rgba(245,185,66,0.2); color: var(--gold); }
+.nav-item .lock {
+  margin-inline-start: auto; opacity: 0.4; width: 12px; height: 12px;
+}
+.sidebar-foot {
+  margin-top: auto; padding: 11px;
+  font-size: 10.5px; color: var(--text-3);
+  border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 3px;
+}
+.live-pill { display: flex; align-items: center; gap: 6px; }
+.live-pill::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--emerald); box-shadow: 0 0 8px var(--emerald);
+  animation: pulse 1.6s infinite;
+}
+@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1);} 50% { opacity: 0.5; transform: scale(0.85);} }
+
+.content { overflow-y: auto; padding: 20px 24px 40px; }
+.page-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 18px; flex-wrap: wrap; gap: 10px;
+}
+.page-title { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+.page-sub { color: var(--text-3); font-size: 12.5px; margin-top: 3px; }
+.page-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ============ BUTTONS ============ */
+.btn {
+  height: 34px; padding: 0 13px;
+  border-radius: 9px; font-weight: 600; font-size: 12.5px;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: all 0.15s; white-space: nowrap;
+}
+.btn svg { width: 14px; height: 14px; }
+.btn-primary {
+  background: linear-gradient(135deg, var(--gold), var(--gold-2));
+  color: #1a1208; box-shadow: 0 4px 14px rgba(245,185,66,0.25);
+}
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(245,185,66,0.35); }
+.btn-secondary { background: var(--glass); color: var(--text); border: 1px solid var(--border); }
+.btn-secondary:hover { background: var(--glass-2); border-color: var(--border-2); }
+.btn-danger { background: rgba(244,63,94,0.12); color: var(--rose); border: 1px solid rgba(244,63,94,0.25); }
+.btn-danger:hover { background: rgba(244,63,94,0.2); }
+.btn-success { background: rgba(16,185,129,0.12); color: var(--emerald); border: 1px solid rgba(16,185,129,0.25); }
+.btn-success:hover { background: rgba(16,185,129,0.2); }
+.btn-sm { height: 28px; padding: 0 10px; font-size: 11.5px; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ============ CARDS / KPIS ============ */
+.card {
+  background: var(--glass); backdrop-filter: blur(18px);
+  border: 1px solid var(--border); border-radius: var(--r);
+  padding: 16px; position: relative;
+}
+.card-title {
+  font-size: 12.5px; font-weight: 600; color: var(--text-2);
+  margin-bottom: 12px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+
+.kpi-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px; margin-bottom: 20px;
+}
+.kpi {
+  background: var(--glass); backdrop-filter: blur(18px);
+  border: 1px solid var(--border); border-radius: var(--r);
+  padding: 14px 16px; position: relative; overflow: hidden;
+}
+.kpi::before {
+  content: ''; position: absolute; inset-block-start: 0; inset-inline-start: 0;
+  width: 3px; height: 100%; background: var(--accent, var(--gold));
+}
+.kpi-label { font-size: 11.5px; color: var(--text-3); font-weight: 500; }
+.kpi-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 26px; font-weight: 700; margin-top: 4px;
+  letter-spacing: -0.02em; color: var(--text);
+}
+.kpi-delta {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10.5px; font-weight: 600; margin-top: 4px;
+  padding: 2px 7px; border-radius: 5px;
+}
+.kpi-delta.up { background: rgba(16,185,129,0.12); color: var(--emerald); }
+.kpi-delta.down { background: rgba(244,63,94,0.12); color: var(--rose); }
+.kpi-delta.neutral { background: var(--glass-2); color: var(--text-2); }
+.kpi-icon {
+  position: absolute; inset-block-start: 12px; inset-inline-end: 12px;
+  width: 28px; height: 28px; border-radius: 7px;
+  background: var(--accent-bg, rgba(245,185,66,0.1));
+  color: var(--accent, var(--gold));
+  display: flex; align-items: center; justify-content: center;
+}
+.kpi-icon svg { width: 14px; height: 14px; }
+
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.grid-2-1 { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 12px; }
+@media (max-width: 1100px) { .grid-2, .grid-3, .grid-2-1 { grid-template-columns: 1fr; } }
+
+/* ============ TABLES ============ */
+.table-wrap {
+  background: var(--glass); backdrop-filter: blur(18px);
+  border: 1px solid var(--border); border-radius: var(--r); overflow: hidden;
+}
+.table-toolbar {
+  padding: 11px 13px;
+  display: flex; align-items: center; gap: 9px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.search-input, .filter-select {
+  height: 30px; padding: 0 11px;
+  background: rgba(0,0,0,0.25); border: 1px solid var(--border);
+  border-radius: 7px; color: var(--text); font-size: 12px;
+}
+.search-input { width: 220px; }
+.search-input:focus, .filter-select:focus { outline: none; border-color: var(--gold); }
+
+table.data { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.data thead th {
+  text-align: start; padding: 10px 13px;
+  font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-3); background: rgba(0,0,0,0.18);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+table.data tbody td { padding: 10px 13px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+table.data tbody tr:last-child td { border-bottom: none; }
+table.data tbody tr { transition: background 0.1s; }
+table.data tbody tr:hover { background: rgba(255,255,255,0.025); }
+table.data tbody tr.clickable { cursor: pointer; }
+.empty-state { padding: 40px 20px; text-align: center; color: var(--text-3); font-size: 12.5px; }
+
+/* ============ BADGES ============ */
+.badge-status {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 8px; border-radius: 5px;
+  font-size: 10.5px; font-weight: 700; white-space: nowrap;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.02em;
+}
+.badge-status::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.b-active, .b-running { background: rgba(16,185,129,0.12); color: var(--emerald); }
+.b-pending { background: rgba(245,158,11,0.12); color: var(--amber); }
+.b-progress { background: rgba(56,189,248,0.12); color: var(--sky); }
+.b-done, .b-completed { background: rgba(167,139,250,0.12); color: var(--violet); }
+.b-rejected { background: rgba(244,63,94,0.12); color: var(--rose); }
+.b-closed, .b-idle { background: rgba(255,255,255,0.06); color: var(--text-3); }
+.b-maintenance { background: rgba(244,63,94,0.12); color: var(--rose); }
+
+.dept-tag {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 7px; border-radius: 5px;
+  font-size: 10.5px; font-weight: 600;
+  background: var(--dept-bg, var(--glass-2));
+  color: var(--dept-color, var(--text-2));
+}
+.dept-tag::before {
+  content: ''; width: 5px; height: 5px; border-radius: 50%;
+  background: currentColor;
+}
+
+/* ============ LIVE PIPELINE (Dashboard) ============ */
+.pipeline {
+  background: var(--glass); backdrop-filter: blur(18px);
+  border: 1px solid var(--border); border-radius: var(--r);
+  padding: 22px 18px 18px;
+  margin-bottom: 14px;
+  position: relative; overflow: hidden;
+}
+.pipeline-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 22px;
+}
+.pipeline-title {
+  font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px;
+}
+.pipeline-title::before {
+  content: ''; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--emerald); box-shadow: 0 0 10px var(--emerald);
+  animation: pulse 1.6s infinite;
+}
+.pipeline-stages {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0; position: relative;
+  padding: 6px 0;
+}
+@media (max-width: 1300px) { .pipeline-stages { grid-template-columns: repeat(4, 1fr); row-gap: 22px; } }
+@media (max-width: 700px) { .pipeline-stages { grid-template-columns: repeat(2, 1fr); } }
+
+.stage {
+  position: relative; text-align: center;
+  padding: 0 6px;
+}
+.stage:not(:last-child)::after {
+  content: ''; position: absolute;
+  inset-block-start: 26px;
+  inset-inline-start: 50%;
+  width: 100%; height: 2px;
+  background: linear-gradient(90deg, var(--border-2), var(--border));
+  z-index: 0;
+}
+body[dir="rtl"] .stage:not(:last-child)::after {
+  background: linear-gradient(-90deg, var(--border-2), var(--border));
+}
+.stage.has-flow::after {
+  background: linear-gradient(90deg, var(--gold), var(--gold-2));
+  background-size: 200% 100%;
+  animation: flow 1.8s linear infinite;
+}
+@keyframes flow {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.stage-node {
+  width: 54px; height: 54px;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: var(--bg-2);
+  border: 2px solid var(--border-2);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 800; font-size: 13px;
+  position: relative; z-index: 1;
+  transition: all 0.3s;
+}
+.stage.active .stage-node {
+  background: linear-gradient(135deg, rgba(245,185,66,0.2), rgba(245,185,66,0.05));
+  border-color: var(--gold);
+  color: var(--gold);
+  box-shadow: 0 0 20px rgba(245,185,66,0.25);
+}
+.stage.completed .stage-node { border-color: var(--emerald); color: var(--emerald); }
+.stage.idle .stage-node { opacity: 0.55; }
+.stage-count {
+  position: absolute;
+  inset-block-start: -6px; inset-inline-end: 12px;
+  background: var(--gold); color: #1a1208;
+  font-size: 10px; font-weight: 800;
+  padding: 1px 6px; border-radius: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  z-index: 2;
+  min-width: 18px; text-align: center;
+}
+.stage-name { font-size: 10.5px; color: var(--text-2); margin-top: 8px; font-weight: 600; line-height: 1.3; }
+.stage-user {
+  font-size: 9.5px; color: var(--text-3);
+  margin-top: 2px; font-weight: 500;
+}
+.stage-user .ouser { color: var(--gold); font-weight: 700; }
+.stage-flow-anim {
+  position: absolute; inset: 0;
+  pointer-events: none; overflow: hidden;
+  border-radius: var(--r);
+}
+.flow-particle {
+  position: absolute;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 10px var(--gold);
+  opacity: 0;
+}
+
+/* ============ STATIONS ============ */
+.station-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.station {
+  background: var(--glass); backdrop-filter: blur(18px);
+  border: 1px solid var(--border); border-radius: var(--r);
+  padding: 14px; position: relative; overflow: hidden;
+  cursor: pointer; transition: all 0.15s;
+}
+.station:hover { border-color: var(--border-2); transform: translateY(-2px); }
+.station.running { border-color: rgba(16,185,129,0.4); }
+.station.running::before {
+  content: ''; position: absolute; inset-block-start: 0; inset-inline: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--emerald), transparent);
+  background-size: 200% 100%;
+  animation: scan 2s infinite linear;
+}
+@keyframes scan { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.station.idle { opacity: 0.7; }
+.station.maintenance { border-color: rgba(244,63,94,0.4); }
+.station-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.station-code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 22px; font-weight: 800; color: var(--gold); letter-spacing: -0.02em;
+}
+.station-pulse {
+  width: 9px; height: 9px; border-radius: 50%; background: var(--text-3);
+}
+.station.running .station-pulse {
+  background: var(--emerald); box-shadow: 0 0 10px var(--emerald);
+  animation: pulse 1.6s infinite;
+}
+.station.maintenance .station-pulse { background: var(--rose); box-shadow: 0 0 10px var(--rose); }
+.station-name { font-size: 11.5px; color: var(--text-2); margin-bottom: 10px; min-height: 28px; line-height: 1.35; }
+.station-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.station-stat-label { font-size: 9.5px; color: var(--text-3); text-transform: uppercase; }
+.station-stat-value { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 15px; }
+.station-progress {
+  height: 4px; background: rgba(255,255,255,0.05);
+  border-radius: 2px; margin-top: 11px; overflow: hidden;
+}
+.station-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold), var(--gold-2));
+  border-radius: 2px; transition: width 0.4s;
+}
+.station-operator {
+  margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 10.5px; color: var(--text-3);
+  display: flex; align-items: center; gap: 6px;
+}
+.station-operator .opname { color: var(--text-2); font-weight: 600; }
+
+/* ============ FORMS ============ */
+.form-grid { display: grid; gap: 12px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+@media (max-width: 600px) { .form-row { grid-template-columns: 1fr; } }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 11.5px; font-weight: 600; color: var(--text-2); }
+.field label .req { color: var(--rose); }
+.field input, .field select, .field textarea {
+  height: 36px; padding: 0 11px;
+  background: rgba(0,0,0,0.28); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text); font-size: 12.5px; width: 100%;
+}
+.field textarea { height: auto; padding: 9px 11px; min-height: 64px; resize: vertical; }
+.field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--gold); }
+.field-hint { font-size: 10.5px; color: var(--text-3); }
+
+/* ============ MODAL ============ */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.7); backdrop-filter: blur(6px);
+  z-index: 100; display: none;
+  align-items: center; justify-content: center; padding: 20px;
+}
+.modal-overlay.show { display: flex; animation: fadeIn 0.2s; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.modal {
+  background: var(--bg-1);
+  border: 1px solid var(--border-2); border-radius: var(--r);
+  width: 100%; max-width: 520px; max-height: 90vh;
+  display: flex; flex-direction: column;
+  box-shadow: var(--shadow);
+}
+.modal.lg { max-width: 760px; }
+.modal-head {
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.modal-title { font-weight: 700; font-size: 15px; }
+.modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+.modal-foot {
+  padding: 13px 20px; border-top: 1px solid var(--border);
+  display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap;
+}
+
+/* ============ TOAST ============ */
+.toast-container {
+  position: fixed; inset-block-end: 18px; inset-inline-end: 18px;
+  z-index: 200; display: flex; flex-direction: column; gap: 8px;
+}
+.toast {
+  padding: 11px 14px; background: var(--bg-2);
+  border: 1px solid var(--border-2); border-radius: 9px;
+  font-size: 12.5px; box-shadow: var(--shadow);
+  min-width: 240px; animation: slideUp 0.25s ease;
+  display: flex; align-items: center; gap: 9px;
+  transition: opacity 0.4s;
+}
+.toast.success { border-color: rgba(16,185,129,0.45); }
+.toast.error { border-color: rgba(244,63,94,0.45); }
+.toast.warn { border-color: rgba(245,158,11,0.45); }
+.toast.info { border-color: rgba(56,189,248,0.45); }
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* ============ LOGIN SPLASH ============ */
+.splash {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-0); z-index: 1000;
+  flex-direction: column;
+}
+.splash::before {
+  content: ''; position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(245,185,66,0.08), transparent 50%),
+    radial-gradient(ellipse 60% 50% at 50% 100%, rgba(56,189,248,0.06), transparent 50%);
+  pointer-events: none;
+}
+.splash-card {
+  position: relative;
+  background: var(--glass-2); backdrop-filter: blur(20px);
+  border: 1px solid var(--border-2); border-radius: 18px;
+  padding: 32px 32px 26px;
+  width: 420px; max-width: 90%;
+}
+.splash-mark {
+  width: 56px; height: 56px;
+  margin: 0 auto 16px;
+  background: linear-gradient(135deg, var(--gold), var(--gold-2));
+  border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; color: #1a1208; font-size: 24px;
+  box-shadow: 0 8px 24px rgba(245,185,66,0.4);
+}
+.splash-title { text-align: center; font-size: 19px; font-weight: 700; margin-bottom: 4px; }
+.splash-sub { text-align: center; color: var(--text-3); font-size: 12px; margin-bottom: 22px; }
+
+.user-card-list {
+  display: grid; gap: 8px; max-height: 340px; overflow-y: auto;
+  padding: 2px;
+}
+.user-card {
+  display: flex; align-items: center; gap: 11px;
+  padding: 10px 12px;
+  background: var(--glass);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer; transition: all 0.15s;
+  text-align: start;
+}
+.user-card:hover { background: var(--glass-2); border-color: var(--border-2); }
+.user-card .user-avatar { width: 34px; height: 34px; font-size: 13px; }
+.user-card-info { flex: 1; }
+.user-card-name { font-size: 13px; font-weight: 600; }
+.user-card-meta { font-size: 11px; color: var(--text-3); margin-top: 2px; display: flex; align-items: center; gap: 6px; }
+
+/* ============ MISC ============ */
+.text-mute { color: var(--text-3); }
+.text-2 { color: var(--text-2); }
+.text-emerald { color: var(--emerald); }
+.text-rose { color: var(--rose); }
+.text-gold { color: var(--gold); }
+.text-sky { color: var(--sky); }
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.gap-1 { gap: 5px; } .gap-2 { gap: 10px; }
+.flex-wrap { flex-wrap: wrap; }
+.mt-1 { margin-top: 8px; } .mt-2 { margin-top: 14px; } .mt-3 { margin-top: 22px; }
+.mb-1 { margin-bottom: 8px; } .mb-2 { margin-bottom: 14px; } .mb-3 { margin-bottom: 22px; }
+.hidden { display: none !important; }
+.w-full { width: 100%; }
+.tag {
+  display: inline-block; padding: 2px 7px;
+  background: var(--glass-2); border-radius: 5px;
+  font-size: 10.5px; color: var(--text-2);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Trace timeline */
+.trace-step {
+  display: flex; gap: 13px;
+  padding: 11px 0;
+  border-bottom: 1px dashed var(--border);
+  position: relative;
+}
+.trace-step:last-child { border-bottom: none; }
+.trace-dot {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: var(--glass-2);
+  border: 2px solid var(--border-2);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; font-weight: 700;
+}
+.trace-step.done .trace-dot { background: rgba(16,185,129,0.15); border-color: var(--emerald); color: var(--emerald); }
+.trace-step.current .trace-dot { background: rgba(245,185,66,0.15); border-color: var(--gold); color: var(--gold); }
+.trace-step.rejected .trace-dot { background: rgba(244,63,94,0.15); border-color: var(--rose); color: var(--rose); }
+
+/* Audit row */
+.audit-row {
+  display: grid;
+  grid-template-columns: 110px 1fr auto;
+  gap: 12px; align-items: center;
+  padding: 9px 13px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+}
+.audit-row:last-child { border-bottom: none; }
+.audit-time { font-family: 'JetBrains Mono', monospace; color: var(--text-3); font-size: 10.5px; }
+.audit-msg { color: var(--text-2); }
+.audit-msg b { color: var(--text); font-weight: 600; }
+.audit-user { font-size: 10.5px; color: var(--text-3); }
+
+/* Live ticker */
+.ticker {
+  background: var(--glass); backdrop-filter: blur(18px);
+  border: 1px solid var(--border); border-radius: var(--r);
+  overflow: hidden;
+  height: 100%;
+  display: flex; flex-direction: column;
+}
+.ticker-head {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600; font-size: 12.5px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.ticker-list { overflow-y: auto; flex: 1; max-height: 340px; }
+.ticker-item {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex; gap: 11px; align-items: flex-start;
+  animation: slideIn 0.4s;
+}
+@keyframes slideIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
+body[dir="rtl"] .ticker-item { animation: slideInRtl 0.4s; }
+@keyframes slideInRtl { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
+.ticker-icon {
+  width: 28px; height: 28px; border-radius: 7px;
+  background: var(--glass-2);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.ticker-icon.ok { background: rgba(16,185,129,0.12); color: var(--emerald); }
+.ticker-icon.warn { background: rgba(245,158,11,0.12); color: var(--amber); }
+.ticker-icon.err { background: rgba(244,63,94,0.12); color: var(--rose); }
+.ticker-icon.info { background: rgba(56,189,248,0.12); color: var(--sky); }
+.ticker-body { flex: 1; min-width: 0; }
+.ticker-msg { font-size: 12px; color: var(--text); }
+.ticker-msg b { font-weight: 600; }
+.ticker-meta { font-size: 10.5px; color: var(--text-3); margin-top: 2px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--glass-2); border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-2); }
+
+/* WO card mini */
+.wo-mini {
+  background: var(--glass-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 11px;
+  font-size: 11.5px;
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.wo-mini-id { font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--text); }
+
+/* My tasks card */
+.task-card {
+  background: var(--glass); border: 1px solid var(--border);
+  border-radius: var(--r); padding: 14px;
+  display: flex; flex-direction: column; gap: 10px;
+  transition: all 0.15s;
+}
+.task-card:hover { border-color: var(--border-2); }
+.task-card.urgent { border-color: rgba(244,63,94,0.4); }
+
+@media print {
+  body::before, .topbar, .sidebar, .page-actions, .splash { display: none !important; }
+  .main { grid-template-columns: 1fr !important; }
+  .content { padding: 0 !important; overflow: visible !important; }
+}
+</style>
+</head>
+<body data-lang="ar">
+
+<!-- ============ LOGIN SPLASH ============ -->
+<div class="splash" id="splash">
+  <div class="splash-card">
+    <div class="splash-mark">P</div>
+    <div class="splash-title">ProdLine OS</div>
+    <div class="splash-sub" id="splashSub">تسجيل الدخول</div>
+    <form id="loginForm" onsubmit="event.preventDefault();App.doLogin();" style="display:flex;flex-direction:column;gap:12px">
+      <div class="field">
+        <label>الإيميل / Email</label>
+        <input type="email" id="loginEmail" required autocomplete="email" placeholder="name@veridos.iq" />
+      </div>
+      <div class="field">
+        <label>كلمة السر / Password</label>
+        <input type="password" id="loginPassword" required autocomplete="current-password" />
+      </div>
+      <div id="loginError" style="display:none;padding:9px 11px;background:rgba(244,63,94,0.1);border:1px solid rgba(244,63,94,0.3);border-radius:8px;color:var(--rose);font-size:12px"></div>
+      <button type="submit" class="btn btn-primary" id="loginBtn" style="height:42px;justify-content:center;font-size:13px">دخول النظام</button>
+    </form>
+    <div style="margin-top: 16px; font-size: 10.5px; color: var(--text-3); text-align: center;" id="splashFoot">
+      الإصدار 1.0 · مرتبط بـ Supabase
+    </div>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <!-- Top Bar -->
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark">P</div>
+      <div>
+        <div class="brand-name">ProdLine OS</div>
+        <div class="brand-sub" id="brandSub">نظام مراقبة خط الإنتاج</div>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button class="lang-toggle" onclick="App.toggleLang()" id="langBtn">EN</button>
+      <button class="icon-btn" onclick="window.print()" title="Print">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+      </button>
+      <div class="user-chip">
+        <div class="user-avatar" id="userAvatar">M</div>
+        <div class="user-info">
+          <div id="userName">—</div>
+          <div class="role" id="userRole">—</div>
+        </div>
+      </div>
+      <button class="logout-btn" onclick="App.logout()">خروج</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <aside class="sidebar" id="sidebar"></aside>
+    <main class="content" id="content"></main>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modal" onclick="if(event.target===this)App.closeModal()">
+  <div class="modal" id="modalBox">
+    <div class="modal-head">
+      <div class="modal-title" id="modalTitle">—</div>
+      <button class="icon-btn" onclick="App.closeModal()" style="width: 28px; height: 28px;">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot" id="modalFoot"></div>
+  </div>
+</div>
+
+<div class="toast-container" id="toasts"></div>
+
+<script>
+/* =============================================================
+   ProdLine OS — Production Line Monitoring & Traceability
+   Single-file SaaS-style application built on Veridos flow pattern
+   ============================================================= */
+
+const STORAGE_KEY = 'prodline_os_v2';
+
+/* ============================================================
+   SUPABASE CONFIGURATION
+   ⚠️ استبدل القيمتين أدناه بقيم مشروعك من Supabase Dashboard:
+   Project Settings → API → Project URL + anon public key
+   ============================================================ */
+const SUPABASE_CONFIG = {
+  url: 'https://wowaehfygmpwdmrtlrjp.supabase.co',
+  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indvd2FlaGZ5Z21wd2RtcnRscmpwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczMTYyNzIsImV4cCI6MjA5Mjg5MjI3Mn0.qnqWkkQ5fOMMKrH54pT5G0Flx5LfIyVt9YTb6FEqaxY'
+};
+
+const sb = (window.supabase && SUPABASE_CONFIG.url.startsWith('http'))
+  ? window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey, {
+      auth: { persistSession: true, autoRefreshToken: true, storageKey: 'prodline_auth' }
+    })
+  : null;
+
+const I18N = {
+  ar: {
+    splash_sub: 'اختر المستخدم لتسجيل الدخول',
+    nav_overview: 'نظرة عامة', nav_dashboard: 'لوحة التحكم اللايف', nav_mytasks: 'مهامي',
+    nav_operations: 'العمليات', nav_floor: 'أرضية الإنتاج', nav_wo: 'أوامر الشغل', nav_wh: 'المستودعات',
+    nav_quality: 'الجودة (MOC)', nav_maint: 'الصيانة',
+    nav_compliance: 'الرقابة', nav_trace: 'التتبع الكامل', nav_audit: 'سجل التدقيق', nav_admin: 'الإدارة',
+    sys_online: 'النظام متصل', last_sync: 'تحديث لايف',
+    create_wo: 'إنشاء WO', issue_materials: 'صرف مواد', start_station: 'تشغيل المحطة',
+    complete_handover: 'تسليم للمحطة التالية', moc_check: 'فحص MOC', accept: 'قبول', reject: 'رفض',
+    move_pmf: 'نقل إلى PMF', move_gdn: 'نقل إلى GDN', deliver: 'تسليم نهائي',
+    request_maint: 'طلب صيانة', logout_btn: 'خروج',
+    no_perm: 'ليس لديك صلاحية لهذا الإجراء',
+    confirm: 'تأكيد', cancel: 'إلغاء', save: 'حفظ', close: 'إغلاق',
+  },
+  en: {
+    splash_sub: 'Select a user to sign in',
+    nav_overview: 'Overview', nav_dashboard: 'Live Dashboard', nav_mytasks: 'My Tasks',
+    nav_operations: 'Operations', nav_floor: 'Production Floor', nav_wo: 'Work Orders', nav_wh: 'Warehouses',
+    nav_quality: 'Quality (MOC)', nav_maint: 'Maintenance',
+    nav_compliance: 'Compliance', nav_trace: 'Traceability', nav_audit: 'Audit Log', nav_admin: 'Admin',
+    sys_online: 'System Online', last_sync: 'Live sync',
+    create_wo: 'Create WO', issue_materials: 'Issue Materials', start_station: 'Start Station',
+    complete_handover: 'Handover to Next', moc_check: 'MOC Check', accept: 'Accept', reject: 'Reject',
+    move_pmf: 'Move to PMF', move_gdn: 'Move to GDN', deliver: 'Final Delivery',
+    request_maint: 'Request Maintenance', logout_btn: 'Logout',
+    no_perm: 'You don\'t have permission for this action',
+    confirm: 'Confirm', cancel: 'Cancel', save: 'Save', close: 'Close',
+  }
+};
+
+const State = {
+  data: null, route: 'dashboard', user: null, lang: 'ar', liveTimer: null,
+  load() {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) { try { this.data = JSON.parse(raw); } catch(e) { this.data = Seed.generate(); } }
+    else { this.data = Seed.generate(); }
+    this.migrate();
+    this.save();
+  },
+  // Forward-compatible migration so older saves get new fields
+  migrate() {
+    if (!this.data.departments) {
+      // Deep copy DEPTS into mutable storage
+      this.data.departments = JSON.parse(JSON.stringify(DEPTS));
+    }
+    if (!this.data.stageOverrides) this.data.stageOverrides = {};
+    if (!this.data.meta) this.data.meta = { version: '1.0', initialized: now() };
+  },
+  save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.data)); },
+  reset() { localStorage.removeItem(STORAGE_KEY); this.data = Seed.generate(); this.migrate(); this.save(); }
+};
+
+const t = (k) => I18N[State.lang][k] || k;
+const uid = (p='ID') => p + '-' + Date.now().toString(36).toUpperCase().slice(-4) + Math.random().toString(36).toUpperCase().slice(2,5);
+const now = () => new Date().toISOString();
+
+const fmt = {
+  num(n) { return new Intl.NumberFormat('en-US').format(Math.round(n||0)); },
+  pct(n,d=1) { return ((n||0)).toFixed(d) + '%'; },
+  date(iso) { if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('en-GB') + ' ' + d.toTimeString().slice(0,5); },
+  ago(iso) {
+    if (!iso) return '—';
+    const m = (Date.now() - new Date(iso).getTime()) / 60000;
+    if (m < 1) return State.lang === 'ar' ? 'الآن' : 'now';
+    if (m < 60) return Math.round(m) + (State.lang === 'ar' ? ' د' : 'm');
+    if (m < 1440) return Math.round(m/60) + (State.lang === 'ar' ? ' س' : 'h');
+    return Math.round(m/1440) + (State.lang === 'ar' ? ' ي' : 'd');
+  }
+};
+
+function toast(msg, type='info') {
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  const i = {success:'✓', error:'✕', warn:'⚠', info:'ℹ'};
+  el.innerHTML = `<span style="font-weight:700;font-size:14px">${i[type]||'•'}</span><span>${msg}</span>`;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(()=> el.style.opacity='0', 2800);
+  setTimeout(()=> el.remove(), 3200);
+}
+
+const escapeHTML = (s) => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const Audit = {
+  log(action, entity, entityId, details={}) {
+    State.data.audit.unshift({
+      id: uid('AUD'), ts: now(),
+      user: State.user?.id, userName: State.user?.name,
+      action, entity, entityId, details,
+    });
+    if (State.data.audit.length > 500) State.data.audit.length = 500;
+    State.save();
+  }
+};
+
+const Movements = {
+  add(type, msg, ctx={}) {
+    State.data.movements.unshift({
+      id: uid('MV'), ts: now(), type, msg, ctx,
+      user: State.user?.id, userName: State.user?.name,
+    });
+    if (State.data.movements.length > 100) State.data.movements.length = 100;
+    State.save();
+  }
+};
+
+/* ============ DEPARTMENTS & PERMISSIONS ============ */
+const DEPTS = {
+  MGMT:    { id: 'MGMT',    name: 'الإدارة العامة',       nameEn: 'Management',     color: '#f5b942', bg: 'rgba(245,185,66,0.12)' },
+  RAW:     { id: 'RAW',     name: 'مستودع المواد الخام',   nameEn: 'Raw Materials WH', color: '#14b8a6', bg: 'rgba(20,184,166,0.12)' },
+  PROD:    { id: 'PROD',    name: 'الإنتاج',              nameEn: 'Production',     color: '#38bdf8', bg: 'rgba(56,189,248,0.12)' },
+  QC:      { id: 'QC',      name: 'الجودة (MOC)',         nameEn: 'Quality (MOC)',  color: '#a78bfa', bg: 'rgba(167,139,250,0.12)' },
+  IFA:     { id: 'IFA',     name: 'مستودع IFA',           nameEn: 'IFA WH',         color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
+  PMF:     { id: 'PMF',     name: 'مستودع PMF',           nameEn: 'PMF WH',         color: '#10b981', bg: 'rgba(16,185,129,0.12)' },
+  GDN:     { id: 'GDN',     name: 'مستودع GDN',           nameEn: 'GDN WH',         color: '#8b5cf6', bg: 'rgba(139,92,246,0.12)' },
+  MAINT:   { id: 'MAINT',   name: 'الصيانة',              nameEn: 'Maintenance',    color: '#f43f5e', bg: 'rgba(244,63,94,0.12)' },
+};
+
+// Stage definitions — each stage owns the dept that handles it
+const STAGES = [
+  { id: 'CREATED',          name: 'تم الإنشاء',           nameEn: 'Created',          dept: 'PROD', code: 'WO' },
+  { id: 'MAT_REQUEST',      name: 'طلب مواد',             nameEn: 'Material Request', dept: 'RAW',  code: 'MR' },
+  { id: 'MAT_ISSUED',       name: 'صرف المواد',           nameEn: 'Materials Issued', dept: 'RAW',  code: 'IS' },
+  { id: 'AT_K1',            name: 'K1 — تجليد',          nameEn: 'K1 — Binding',     dept: 'PROD', code: 'K1' },
+  { id: 'AT_K2',            name: 'K2 — تغليف',          nameEn: 'K2 — Lamination',  dept: 'PROD', code: 'K2' },
+  { id: 'AT_K3',            name: 'K3 — نقش وقطع',       nameEn: 'K3 — Embossing',   dept: 'PROD', code: 'K3' },
+  { id: 'AT_K4',            name: 'K4 — تشخيص',          nameEn: 'K4 — Pre-Person',  dept: 'PROD', code: 'K4' },
+  { id: 'AT_MOC',           name: 'MOC — فحص نهائي',     nameEn: 'MOC — Final QC',   dept: 'QC',   code: 'MOC' },
+  { id: 'AT_PMF',           name: 'مستودع PMF',           nameEn: 'PMF Warehouse',    dept: 'PMF',  code: 'PMF' },
+  { id: 'AT_GDN',           name: 'مستودع GDN',           nameEn: 'GDN Warehouse',    dept: 'GDN',  code: 'GDN' },
+  { id: 'DELIVERED',        name: 'تم التسليم',           nameEn: 'Delivered',        dept: 'GDN',  code: 'OUT' },
+  { id: 'REJECTED',         name: 'مرفوض من MOC',         nameEn: 'Rejected by MOC',  dept: 'QC',   code: 'REJ' },
+];
+
+const STAGE_ORDER = ['CREATED','MAT_REQUEST','MAT_ISSUED','AT_K1','AT_K2','AT_K3','AT_K4','AT_MOC','AT_PMF','AT_GDN','DELIVERED'];
+const stageById = (id) => {
+  const base = STAGES.find(s => s.id === id);
+  if (!base) return null;
+  const ov = State.data?.stageOverrides?.[id];
+  if (!ov) return base;
+  return Object.assign({}, base, ov);
+};
+const nextStage = (id) => { const i = STAGE_ORDER.indexOf(id); return i >= 0 && i < STAGE_ORDER.length - 1 ? STAGE_ORDER[i+1] : null; };
+
+const Perm = {
+  isManager: () => State.user?.dept === 'MGMT',
+  // Can the current user act on this dept?
+  canAct(dept) {
+    if (!State.user) return false;
+    if (State.user.dept === 'MGMT') return true;
+    return State.user.dept === dept;
+  },
+  // Can perform action at current WO stage?
+  canActOnWO(wo) {
+    const st = stageById(wo.currentStage);
+    if (!st) return false;
+    return this.canAct(st.dept);
+  },
+  // Can the user view this module?
+  canView(module) {
+    const u = State.user; if (!u) return false;
+    if (u.dept === 'MGMT') return true;
+    const map = {
+      dashboard: true,
+      mytasks: true,
+      floor: ['PROD','QC','MGMT'],
+      workorders: true,
+      warehouses: ['RAW','IFA','PMF','GDN','MGMT'],
+      quality: ['QC','MGMT'],
+      maintenance: ['MAINT','PROD','MGMT'],
+      trace: true,
+      audit: ['MGMT'],
+      admin: ['MGMT'],
+    };
+    const allowed = map[module];
+    if (allowed === true) return true;
+    return Array.isArray(allowed) && allowed.includes(u.dept);
+  }
+};
+
+/* ============ SEED DATA ============ */
+const Seed = {
+  generate() {
+    const N = Date.now();
+    const h = (n) => new Date(N - n*3600000).toISOString();
+    const d = (n) => new Date(N - n*86400000).toISOString();
+
+    const users = [
+      // Management
+      { id: 'U-001', name: 'مارس (المدير العام)',     nameEn: 'Marius (GM)',         dept: 'MGMT',  role: 'مدير عام',           roleEn: 'General Manager', avatar: 'M', color: '#f5b942' },
+      // Raw WH
+      { id: 'U-010', name: 'سعد فاضل',               nameEn: 'Saad Fadhel',         dept: 'RAW',   role: 'أمين مستودع خام',     roleEn: 'Raw WH Keeper',   avatar: 'س', color: '#14b8a6' },
+      // Production
+      { id: 'U-020', name: 'أحمد كريم',              nameEn: 'Ahmed Karim',         dept: 'PROD',  role: 'مشرف إنتاج',         roleEn: 'Prod Supervisor', avatar: 'أ', color: '#38bdf8' },
+      { id: 'U-021', name: 'علي محمد (مشغل K1)',     nameEn: 'Ali M. (K1 Op)',      dept: 'PROD',  role: 'مشغل K1',            roleEn: 'K1 Operator',     avatar: 'ع', color: '#0ea5e9' },
+      { id: 'U-022', name: 'سامر طارق (مشغل K2)',    nameEn: 'Samer T. (K2 Op)',    dept: 'PROD',  role: 'مشغل K2',            roleEn: 'K2 Operator',     avatar: 'ط', color: '#0ea5e9' },
+      { id: 'U-023', name: 'حيدر زين (مشغل K3)',     nameEn: 'Haidar Z. (K3 Op)',   dept: 'PROD',  role: 'مشغل K3',            roleEn: 'K3 Operator',     avatar: 'ح', color: '#0ea5e9' },
+      { id: 'U-024', name: 'نوار سلام (مشغل K4)',    nameEn: 'Nawar S. (K4 Op)',    dept: 'PROD',  role: 'مشغل K4',            roleEn: 'K4 Operator',     avatar: 'ن', color: '#0ea5e9' },
+      // QC
+      { id: 'U-030', name: 'حسن نوري',               nameEn: 'Hassan Noori',        dept: 'QC',    role: 'مفتش جودة (MOC)',     roleEn: 'QC Inspector',    avatar: 'ج', color: '#a78bfa' },
+      // IFA / PMF / GDN
+      { id: 'U-040', name: 'كرار جواد (IFA)',        nameEn: 'Karrar J. (IFA)',     dept: 'IFA',   role: 'أمين مستودع IFA',     roleEn: 'IFA Keeper',      avatar: 'ك', color: '#22c55e' },
+      { id: 'U-050', name: 'مصطفى رياض (PMF)',       nameEn: 'Mustafa R. (PMF)',    dept: 'PMF',   role: 'أمين مستودع PMF',     roleEn: 'PMF Keeper',      avatar: 'م', color: '#10b981' },
+      { id: 'U-060', name: 'عمر سالم (GDN)',         nameEn: 'Omar S. (GDN)',       dept: 'GDN',   role: 'أمين مستودع GDN',     roleEn: 'GDN Keeper',      avatar: 'ر', color: '#8b5cf6' },
+      // Maintenance
+      { id: 'U-070', name: 'مهند عباس (صيانة)',      nameEn: 'Muhannad A. (Maint)', dept: 'MAINT', role: 'مهندس صيانة',         roleEn: 'Maintenance Eng', avatar: 'ص', color: '#f43f5e' },
+      { id: 'U-071', name: 'باسم نزار (مشرف صيانة)', nameEn: 'Basim N. (Maint Sup)',dept: 'MAINT', role: 'مشرف صيانة',         roleEn: 'Maint Supervisor',avatar: 'ب', color: '#f43f5e' },
+    ];
+
+    // Stations — each station has a primary operator from PROD dept
+    const stations = [
+      { id: 'K1', code: 'K1', name: 'تجليد 2UPs',                nameEn: '2UPs Binding',          operatorId: 'U-021', status: 'running',     currentWO: 'WO-2026-0042', target: 5000, produced: 3240, scrap: 18, startedAt: h(4) },
+      { id: 'K2', code: 'K2', name: 'تغليف الغلاف',              nameEn: 'Cover Lamination',      operatorId: 'U-022', status: 'running',     currentWO: 'WO-2026-0042', target: 3240, produced: 2890, scrap: 12, startedAt: h(3.2) },
+      { id: 'K3', code: 'K3', name: 'النقش الذهبي والقطع',      nameEn: 'Gold Embossing',        operatorId: 'U-023', status: 'idle',        currentWO: null,           target: 0,    produced: 0,    scrap: 0,  startedAt: null },
+      { id: 'K4', code: 'K4', name: 'التشخيص المبدئي للكتيب',   nameEn: 'Booklet Pre-Person',    operatorId: 'U-024', status: 'maintenance', currentWO: null,           target: 0,    produced: 0,    scrap: 0,  startedAt: null },
+      { id: 'MOC',code: 'MOC',name: 'فحص نهاية الإنتاج',         nameEn: 'Product End Control',   operatorId: 'U-030', status: 'running',     currentWO: 'WO-2026-0041', target: 4500, produced: 4500, scrap: 22, startedAt: h(8) },
+    ];
+
+    const warehouses = [
+      { id: 'WH-RAW', code: 'RAW', dept: 'RAW', name: 'المواد الخام',  nameEn: 'Raw Materials', managerId: 'U-010', items: [
+        { sku: 'PC-COVER-A', name: 'غلاف بولي كاربونات',   qty: 18420, unit: 'pcs',  allocated: 5000 },
+        { sku: 'GOLD-FOIL',  name: 'فويل ذهبي',           qty: 2400,  unit: 'roll', allocated: 800 },
+        { sku: 'INK-BLK-01', name: 'حبر أسود',             qty: 850,   unit: 'L',    allocated: 120 },
+        { sku: 'CHIP-RFID',  name: 'شريحة RFID',           qty: 22000, unit: 'pcs',  allocated: 5000 },
+      ]},
+      { id: 'WH-IFA', code: 'IFA', dept: 'IFA', name: 'IFA — شبه نهائي', nameEn: 'IFA Semi-finished', managerId: 'U-040', items: [
+        { sku: 'BLANK-001', name: 'بطاقة فارغة', qty: 12500, unit: 'pcs', allocated: 4500 },
+      ]},
+      { id: 'WH-PMF', code: 'PMF', dept: 'PMF', name: 'PMF — منتج نهائي', nameEn: 'PMF Finished',     managerId: 'U-050', items: [
+        { sku: 'CARD-040', name: 'دفعة 040 جاهزة', qty: 4480, unit: 'pcs', allocated: 0 },
+      ]},
+      { id: 'WH-GDN', code: 'GDN', dept: 'GDN', name: 'GDN — توزيع',      nameEn: 'GDN Distribution', managerId: 'U-060', items: [
+        { sku: 'CARD-039', name: 'دفعة 039 موزعة', qty: 0, unit: 'pcs', allocated: 0 },
+      ]},
+    ];
+
+    // Work Orders with full history
+    const WOs = [];
+    const mkHist = (stage, fromUser, toUser, ts, qty=null, scrap=0, notes='') => ({
+      stage, action: 'handover', fromUser, toUser, qty, scrap, ts, notes
+    });
+
+    WOs.push({
+      id: 'WO-2026-0042', sku: 'CARD-NID-042', desc: 'بطاقة وطنية - دفعة 042',
+      qty: 5000, currentStage: 'AT_K1', currentOwner: 'U-021', priority: 'high',
+      createdBy: 'U-020', createdAt: h(5),
+      produced: 3240, scrap: 30,
+      history: [
+        { stage: 'CREATED',     action: 'create',   fromUser: null,    toUser: 'U-020', qty: 5000, scrap: 0, ts: h(5),   notes: 'WO أنشئ' },
+        { stage: 'MAT_REQUEST', action: 'request',  fromUser: 'U-020', toUser: 'U-010', qty: 5000, scrap: 0, ts: h(4.8), notes: 'طلب مواد للإنتاج' },
+        { stage: 'MAT_ISSUED',  action: 'issue',    fromUser: 'U-010', toUser: 'U-021', qty: 5000, scrap: 0, ts: h(4.5), notes: 'صرف PC + RFID + Foil' },
+        { stage: 'AT_K1',       action: 'start',    fromUser: 'U-021', toUser: 'U-021', qty: 5000, scrap: 0, ts: h(4),   notes: 'بدء تجليد K1' },
+      ]
+    });
+
+    WOs.push({
+      id: 'WO-2026-0041', sku: 'CARD-NID-041', desc: 'بطاقة وطنية - دفعة 041',
+      qty: 4500, currentStage: 'AT_MOC', currentOwner: 'U-030', priority: 'high',
+      createdBy: 'U-020', createdAt: h(14),
+      produced: 4478, scrap: 22,
+      history: [
+        { stage: 'CREATED',     action: 'create',   fromUser: null,    toUser: 'U-020', qty: 4500, scrap: 0, ts: h(14),   notes: '' },
+        { stage: 'MAT_REQUEST', action: 'request',  fromUser: 'U-020', toUser: 'U-010', qty: 4500, scrap: 0, ts: h(13.5), notes: '' },
+        { stage: 'MAT_ISSUED',  action: 'issue',    fromUser: 'U-010', toUser: 'U-021', qty: 4500, scrap: 0, ts: h(13),   notes: '' },
+        { stage: 'AT_K1',       action: 'start',    fromUser: 'U-021', toUser: 'U-021', qty: 4500, scrap: 8, ts: h(12.5), notes: '' },
+        { stage: 'AT_K2',       action: 'handover', fromUser: 'U-021', toUser: 'U-022', qty: 4492, scrap: 0, ts: h(11),   notes: 'نسبة قبول 99.8%' },
+        { stage: 'AT_K3',       action: 'handover', fromUser: 'U-022', toUser: 'U-023', qty: 4490, scrap: 2, ts: h(9.5),  notes: '' },
+        { stage: 'AT_K4',       action: 'handover', fromUser: 'U-023', toUser: 'U-024', qty: 4485, scrap: 5, ts: h(8.5),  notes: '' },
+        { stage: 'AT_MOC',      action: 'handover', fromUser: 'U-024', toUser: 'U-030', qty: 4478, scrap: 7, ts: h(8),    notes: 'في انتظار MOC' },
+      ]
+    });
+
+    WOs.push({
+      id: 'WO-2026-0040', sku: 'CARD-NID-040', desc: 'بطاقة وطنية - دفعة 040',
+      qty: 4500, currentStage: 'AT_PMF', currentOwner: 'U-050', priority: 'medium',
+      createdBy: 'U-020', createdAt: h(36),
+      produced: 4480, scrap: 20,
+      history: [
+        { stage: 'CREATED',     action: 'create',   fromUser: null,    toUser: 'U-020', qty: 4500, scrap: 0, ts: h(36) },
+        { stage: 'MAT_ISSUED',  action: 'issue',    fromUser: 'U-010', toUser: 'U-021', qty: 4500, scrap: 0, ts: h(35) },
+        { stage: 'AT_K4',       action: 'handover', fromUser: 'U-023', toUser: 'U-024', qty: 4490, scrap: 10, ts: h(20) },
+        { stage: 'AT_MOC',      action: 'handover', fromUser: 'U-024', toUser: 'U-030', qty: 4485, scrap: 5, ts: h(18) },
+        { stage: 'AT_PMF',      action: 'accept',   fromUser: 'U-030', toUser: 'U-050', qty: 4480, scrap: 5, ts: h(16),   notes: 'قبول MOC، نقل PMF' },
+      ]
+    });
+
+    WOs.push({
+      id: 'WO-2026-0039', sku: 'CARD-NID-039', desc: 'بطاقة وطنية - دفعة 039',
+      qty: 4500, currentStage: 'DELIVERED', currentOwner: null, priority: 'medium',
+      createdBy: 'U-020', createdAt: h(72),
+      produced: 4470, scrap: 30,
+      history: [
+        { stage: 'CREATED',     action: 'create',   fromUser: null,    toUser: 'U-020', qty: 4500, ts: h(72) },
+        { stage: 'AT_MOC',      action: 'handover', fromUser: 'U-024', toUser: 'U-030', qty: 4485, ts: h(48) },
+        { stage: 'AT_PMF',      action: 'accept',   fromUser: 'U-030', toUser: 'U-050', qty: 4480, ts: h(40) },
+        { stage: 'AT_GDN',      action: 'transfer', fromUser: 'U-050', toUser: 'U-060', qty: 4470, ts: h(20) },
+        { stage: 'DELIVERED',   action: 'deliver',  fromUser: 'U-060', toUser: null,    qty: 4470, ts: h(2), notes: 'تسليم لمكاتب الإصدار' },
+      ]
+    });
+
+    WOs.push({
+      id: 'WO-2026-0043', sku: 'CARD-NID-043', desc: 'بطاقة وطنية - دفعة 043',
+      qty: 5000, currentStage: 'CREATED', currentOwner: 'U-020', priority: 'medium',
+      createdBy: 'U-020', createdAt: h(0.3),
+      produced: 0, scrap: 0,
+      history: [
+        { stage: 'CREATED', action: 'create', fromUser: null, toUser: 'U-020', qty: 5000, scrap: 0, ts: h(0.3), notes: 'WO جديد، بانتظار طلب المواد' },
+      ]
+    });
+
+    const maintenance = [
+      { id: 'MR-001', stationId: 'K4', requestedBy: 'U-024', assignedTo: 'U-070', status: 'in_progress', priority: 'high',
+        title: 'عطل في وحدة التشخيص', desc: 'صوت غير طبيعي + بطء قراءة الشريحة', requestedAt: h(6), startedAt: h(5) },
+      { id: 'MR-002', stationId: 'K2', requestedBy: 'U-022', assignedTo: 'U-070', status: 'completed', priority: 'low',
+        title: 'صيانة دورية', desc: 'تنظيف + تشحيم', requestedAt: h(48), completedAt: h(40) },
+    ];
+
+    const movements = [
+      { id: uid('MV'), ts: h(0.1), type: 'info',    msg: 'WO-2026-0043 تم إنشاؤه',        user: 'U-020', userName: 'أحمد كريم' },
+      { id: uid('MV'), ts: h(0.5), type: 'ok',      msg: 'K1 → K2 تم تسليم 4492 قطعة',    user: 'U-021', userName: 'علي محمد' },
+      { id: uid('MV'), ts: h(1.2), type: 'ok',      msg: 'MOC قبل دفعة 040 (4480 قطعة)', user: 'U-030', userName: 'حسن نوري' },
+      { id: uid('MV'), ts: h(2.5), type: 'warn',    msg: 'تجاوز نسبة Scrap في K3 (1.2%)', user: 'U-023', userName: 'حيدر زين' },
+      { id: uid('MV'), ts: h(5),   type: 'err',     msg: 'K4 توقف للصيانة',              user: 'U-024', userName: 'نوار سلام' },
+      { id: uid('MV'), ts: h(8),   type: 'info',    msg: 'صرف 5000 قطعة من Raw للإنتاج',  user: 'U-010', userName: 'سعد فاضل' },
+    ];
+
+    return {
+      meta: { version: '1.0', initialized: now() },
+      users, stations, warehouses,
+      workOrders: WOs,
+      maintenance,
+      movements,
+      audit: [
+        { id: uid('AUD'), ts: h(0.1), user: 'U-020', userName: 'أحمد كريم', action: 'create_wo', entity: 'WorkOrder', entityId: 'WO-2026-0043', details: { qty: 5000 } },
+        { id: uid('AUD'), ts: h(1.2), user: 'U-030', userName: 'حسن نوري',  action: 'moc_accept', entity: 'WorkOrder', entityId: 'WO-2026-0040', details: { accepted: 4480, rejected: 5 } },
+      ],
+    };
+  }
+};
+
+/* ============ HELPERS ============ */
+const Q = {
+  user(id) { return State.data.users.find(u => u.id === id); },
+  station(id) { return State.data.stations.find(s => s.id === id); },
+  wh(id) { return State.data.warehouses.find(w => w.id === id); },
+  whByDept(dept) { return State.data.warehouses.find(w => w.dept === dept); },
+  wo(id) { return State.data.workOrders.find(w => w.id === id); },
+  usersOf(dept) { return State.data.users.filter(u => u.dept === dept); },
+  dept(id) { return (State.data.departments && State.data.departments[id]) || DEPTS[id] || { id, name: id, nameEn: id, color: '#888', bg: 'rgba(136,136,136,0.12)' }; },
+  ownerOfStage(stage) {
+    // Returns the responsible user for a given stage
+    if (stage === 'CREATED' || stage === 'MAT_REQUEST') return Q.usersOf('PROD').find(u => u.role.includes('مشرف') || u.roleEn.includes('Supervisor'))?.id;
+    if (stage === 'MAT_ISSUED') return Q.usersOf('RAW')[0]?.id;
+    if (stage === 'AT_K1') return Q.station('K1').operatorId;
+    if (stage === 'AT_K2') return Q.station('K2').operatorId;
+    if (stage === 'AT_K3') return Q.station('K3').operatorId;
+    if (stage === 'AT_K4') return Q.station('K4').operatorId;
+    if (stage === 'AT_MOC') return Q.station('MOC').operatorId;
+    if (stage === 'AT_PMF') return Q.whByDept('PMF').managerId;
+    if (stage === 'AT_GDN') return Q.whByDept('GDN').managerId;
+    return null;
+  },
+  woCountByStage() {
+    const map = {};
+    STAGE_ORDER.forEach(s => map[s] = 0);
+    State.data.workOrders.forEach(wo => {
+      if (wo.currentStage !== 'DELIVERED') {
+        if (map[wo.currentStage] !== undefined) map[wo.currentStage]++;
+      }
+    });
+    return map;
+  },
+  // Tasks pending for current user
+  myTasks() {
+    if (!State.user) return [];
+    const tasks = [];
+    State.data.workOrders.forEach(wo => {
+      if (wo.currentStage === 'DELIVERED' || wo.currentStage === 'REJECTED') return;
+      if (wo.currentOwner === State.user.id || (Perm.isManager() && wo.currentStage !== 'DELIVERED')) {
+        tasks.push({ wo, stage: stageById(wo.currentStage) });
+      }
+    });
+    return tasks;
+  }
+};
+
+/* ============ WORKFLOW ENGINE ============ */
+const WF = {
+  // Move WO to next stage with full audit
+  advance(woId, opts = {}) {
+    const wo = Q.wo(woId);
+    if (!wo) return false;
+    const next = nextStage(wo.currentStage);
+    if (!next) { toast(State.lang === 'ar' ? 'لا توجد مرحلة تالية' : 'No next stage', 'warn'); return false; }
+    if (!Perm.canActOnWO(wo)) { toast(t('no_perm'), 'error'); return false; }
+
+    const fromUser = State.user.id;
+    const toUser = Q.ownerOfStage(next);
+    const qty = opts.qty != null ? opts.qty : wo.produced || wo.qty;
+    const scrap = opts.scrap || 0;
+
+    wo.history.push({
+      stage: next,
+      action: opts.action || 'handover',
+      fromUser, toUser,
+      qty, scrap,
+      ts: now(),
+      notes: opts.notes || ''
+    });
+    wo.currentStage = next;
+    wo.currentOwner = toUser;
+    if (opts.scrap) wo.scrap = (wo.scrap || 0) + scrap;
+    if (opts.qty != null) wo.produced = opts.qty;
+
+    Audit.log('advance_wo', 'WorkOrder', woId, { from: stageById(wo.history[wo.history.length-2]?.stage)?.id, to: next, qty, scrap });
+    Movements.add('ok', `${woId} → ${stageById(next).name} (${fmt.num(qty)} قطعة)`, { woId, stage: next });
+    State.save();
+    return true;
+  },
+
+  reject(woId, qtyAccepted, qtyRejected, notes) {
+    const wo = Q.wo(woId);
+    if (!wo) return false;
+    if (wo.currentStage !== 'AT_MOC') { toast(State.lang==='ar'?'لا يمكن الرفض من هذه المرحلة':'Cannot reject from this stage', 'error'); return false; }
+    if (!Perm.canActOnWO(wo)) { toast(t('no_perm'), 'error'); return false; }
+
+    wo.history.push({
+      stage: 'REJECTED', action: 'reject',
+      fromUser: State.user.id, toUser: null,
+      qty: qtyRejected, scrap: qtyRejected,
+      ts: now(),
+      notes: notes || `قبول ${qtyAccepted} ورفض ${qtyRejected}`,
+    });
+    wo.currentStage = 'REJECTED';
+    wo.currentOwner = null;
+    wo.scrap = (wo.scrap || 0) + qtyRejected;
+    Audit.log('reject_wo', 'WorkOrder', woId, { accepted: qtyAccepted, rejected: qtyRejected, notes });
+    Movements.add('err', `${woId} مرفوض من MOC — ${qtyRejected} قطعة scrap`, { woId });
+    State.save();
+    return true;
+  },
+
+  acceptMOC(woId, qty, scrap, notes) {
+    const wo = Q.wo(woId);
+    if (!wo || wo.currentStage !== 'AT_MOC') return false;
+    if (!Perm.canActOnWO(wo)) { toast(t('no_perm'), 'error'); return false; }
+    const toUser = Q.ownerOfStage('AT_PMF');
+    wo.history.push({
+      stage: 'AT_PMF', action: 'accept',
+      fromUser: State.user.id, toUser,
+      qty, scrap: scrap || 0, ts: now(),
+      notes: notes || 'قبول MOC، نقل PMF',
+    });
+    wo.currentStage = 'AT_PMF';
+    wo.currentOwner = toUser;
+    if (scrap) wo.scrap = (wo.scrap || 0) + scrap;
+    wo.produced = qty;
+    Audit.log('moc_accept', 'WorkOrder', woId, { qty, scrap });
+    Movements.add('ok', `${woId} قبول MOC ✓ — ${fmt.num(qty)} قطعة → PMF`, { woId });
+    State.save();
+    return true;
+  }
+};
+
+/* ============ APP / ROUTER ============ */
+const App = {
+  async init() {
+    State.load();
+    // If Supabase isn't configured, fall back to legacy demo mode
+    if (!sb) {
+      this.showLoginError('⚠️ لم يتم ضبط Supabase. حرّر القيم في الكود (SUPABASE_CONFIG) لتفعيل الدخول.');
+      return;
+    }
+    // Try to restore existing session
+    try {
+      const { data: { session } } = await sb.auth.getSession();
+      if (session?.user) {
+        await this.afterAuth(session.user);
+        return;
+      }
+    } catch (e) { console.warn('Session check failed:', e); }
+    // Otherwise show login form
+    this.focusLogin();
+    // Listen for auth state changes (in case of token refresh, logout in another tab)
+    sb.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' && State.user) {
+        State.user = null;
+        this.stopLive();
+        document.getElementById('app').classList.add('hidden');
+        document.getElementById('splash').classList.remove('hidden');
+        this.focusLogin();
+      }
+    });
+  },
+
+  focusLogin() {
+    setTimeout(() => {
+      const el = document.getElementById('loginEmail');
+      if (el) el.focus();
+    }, 50);
+  },
+
+  showLoginError(msg) {
+    const el = document.getElementById('loginError');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.display = 'block';
+  },
+  clearLoginError() {
+    const el = document.getElementById('loginError');
+    if (el) el.style.display = 'none';
+  },
+
+  async doLogin() {
+    if (!sb) { this.showLoginError('Supabase غير مهيّأ'); return; }
+    this.clearLoginError();
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    const btn = document.getElementById('loginBtn');
+    btn.disabled = true;
+    btn.textContent = '...جاري الدخول';
+    try {
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) {
+        this.showLoginError(error.message === 'Invalid login credentials' ? 'إيميل أو كلمة سر خاطئة' : error.message);
+        return;
+      }
+      await this.afterAuth(data.user);
+    } catch (e) {
+      this.showLoginError('خطأ في الاتصال بـ Supabase: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'دخول النظام';
+    }
+  },
+
+  // After successful auth, fetch user profile from public.users and bootstrap UI
+  async afterAuth(authUser) {
+    try {
+      const { data: profile, error } = await sb.from('users')
+        .select('*')
+        .eq('auth_user_id', authUser.id)
+        .single();
+      if (error || !profile) {
+        this.showLoginError('الإيميل صحيح لكن لا يوجد ملف مستخدم مرتبط في public.users. تواصل مع المدير.');
+        await sb.auth.signOut();
+        return;
+      }
+      // Map Supabase profile shape (snake_case) to internal user object
+      const u = this._mapProfile(profile);
+      // Inject into State.data.users (so all existing code that uses Q.user(id) works)
+      const existing = State.data.users.findIndex(x => x.id === u.id);
+      if (existing >= 0) State.data.users[existing] = u; else State.data.users.unshift(u);
+      State.user = u;
+      State.save();
+
+      document.getElementById('splash').classList.add('hidden');
+      document.getElementById('app').classList.remove('hidden');
+      document.getElementById('userAvatar').textContent = u.avatar;
+      document.getElementById('userAvatar').style.background = u.color;
+      document.getElementById('userName').textContent = State.lang==='ar' ? u.name : u.nameEn;
+      document.getElementById('userRole').textContent = State.lang==='ar' ? u.role : u.roleEn;
+      Audit.log('login', 'User', u.id, { method: 'supabase' });
+      this.renderSidebar();
+      this.startLive();
+      this.goto('dashboard');
+    } catch (e) {
+      this.showLoginError('خطأ في تحميل ملف المستخدم: ' + e.message);
+    }
+  },
+
+  // Convert Supabase row (snake_case) to internal shape (camelCase)
+  _mapProfile(row) {
+    return {
+      id: row.id,
+      auth_user_id: row.auth_user_id,
+      name: row.name_ar,
+      nameEn: row.name_en,
+      dept: row.dept_id,
+      role: row.role_ar,
+      roleEn: row.role_en,
+      color: row.color || '#888',
+      avatar: row.avatar || (row.name_ar ? row.name_ar.charAt(0) : '?'),
+      active: row.active !== false,
+    };
+  },
+
+  async logout() {
+    if (State.user) Audit.log('logout', 'User', State.user.id, {});
+    if (sb) { try { await sb.auth.signOut(); } catch(e){} }
+    State.user = null;
+    this.stopLive();
+    document.getElementById('app').classList.add('hidden');
+    document.getElementById('splash').classList.remove('hidden');
+    // Clear password field for safety
+    const pw = document.getElementById('loginPassword'); if (pw) pw.value = '';
+    this.focusLogin();
+  },
+
+  toggleLang() {
+    State.lang = State.lang === 'ar' ? 'en' : 'ar';
+    document.body.dataset.lang = State.lang;
+    document.documentElement.lang = State.lang;
+    document.documentElement.dir = State.lang === 'ar' ? 'rtl' : 'ltr';
+    document.getElementById('langBtn').textContent = State.lang === 'ar' ? 'EN' : 'ع';
+    if (State.user) {
+      document.getElementById('userName').textContent = State.lang==='ar' ? State.user.name : State.user.nameEn;
+      document.getElementById('userRole').textContent = State.lang==='ar' ? State.user.role : State.user.roleEn;
+      this.renderSidebar();
+      this.goto(State.route);
+    } else {
+      const subEl = document.getElementById('splashSub');
+      if (subEl) subEl.textContent = State.lang === 'ar' ? 'تسجيل الدخول' : 'Sign In';
+    }
+  },
+
+  renderSidebar() {
+    const items = [
+      { group: t('nav_overview'), items: [
+        { route: 'dashboard', label: t('nav_dashboard'), icon: 'dashboard' },
+        { route: 'mytasks',   label: t('nav_mytasks'),   icon: 'tasks', badge: Q.myTasks().length },
+      ]},
+      { group: t('nav_operations'), items: [
+        { route: 'floor',       label: t('nav_floor'),    icon: 'floor' },
+        { route: 'workorders',  label: t('nav_wo'),       icon: 'wo', badge: State.data.workOrders.filter(w=>w.currentStage!=='DELIVERED'&&w.currentStage!=='REJECTED').length },
+        { route: 'warehouses',  label: t('nav_wh'),       icon: 'wh' },
+        { route: 'quality',     label: t('nav_quality'),  icon: 'qc', badge: State.data.workOrders.filter(w=>w.currentStage==='AT_MOC').length },
+        { route: 'maintenance', label: t('nav_maint'),    icon: 'maint', badge: State.data.maintenance.filter(m=>m.status==='in_progress'||m.status==='pending').length },
+      ]},
+      { group: t('nav_compliance'), items: [
+        { route: 'trace',  label: t('nav_trace'),  icon: 'trace' },
+        { route: 'audit',  label: t('nav_audit'),  icon: 'audit' },
+        { route: 'admin',  label: t('nav_admin'),  icon: 'admin' },
+      ]},
+    ];
+
+    const ICONS = {
+      dashboard:'<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0h6"/></svg>',
+      tasks:'<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>',
+      floor:'<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2"/></svg>',
+      wo:'<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>',
+      wh:'<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5"/></svg>',
+      qc:'<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/></svg>',
+      maint:'<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>',
+      trace:'<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>',
+      audit:'<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>',
+      admin:'<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>',
+    };
+
+    let html = '';
+    items.forEach(g => {
+      const visible = g.items.filter(it => Perm.canView(it.route));
+      if (!visible.length) return;
+      html += `<div class="nav-group"><div class="nav-group-title">${escapeHTML(g.group)}</div>`;
+      visible.forEach(it => {
+        const active = State.route === it.route ? 'active' : '';
+        const badge = it.badge ? `<span class="badge">${it.badge}</span>` : '';
+        html += `<button class="nav-item ${active}" onclick="App.goto('${it.route}')">${ICONS[it.icon]||''}<span>${escapeHTML(it.label)}</span>${badge}</button>`;
+      });
+      html += `</div>`;
+    });
+    html += `<div class="sidebar-foot">
+      <div class="live-pill">${escapeHTML(t('sys_online'))}</div>
+      <div>${escapeHTML(t('last_sync'))}</div>
+      <div style="margin-top:6px"><button onclick="App.confirmReset()" style="font-size:10px;color:var(--text-3);text-decoration:underline">${State.lang==='ar'?'إعادة ضبط البيانات التجريبية':'Reset demo data'}</button></div>
+    </div>`;
+
+    document.getElementById('sidebar').innerHTML = html;
+  },
+
+  goto(route) {
+    if (!Perm.canView(route)) { toast(t('no_perm'), 'error'); return; }
+    State.route = route;
+    this.renderSidebar();
+    const fns = {
+      dashboard:   View.dashboard,
+      mytasks:     View.mytasks,
+      floor:       View.floor,
+      workorders:  View.workorders,
+      warehouses:  View.warehouses,
+      quality:     View.quality,
+      maintenance: View.maintenance,
+      trace:       View.trace,
+      audit:       View.audit,
+      admin:       View.admin,
+    };
+    (fns[route] || View.dashboard)();
+    document.getElementById('content').scrollTop = 0;
+  },
+
+  // Modal helpers
+  openModal(title, body, footer, lg=false) {
+    document.getElementById('modalTitle').textContent = title;
+    document.getElementById('modalBody').innerHTML = body;
+    document.getElementById('modalFoot').innerHTML = footer || '';
+    document.getElementById('modalBox').classList.toggle('lg', lg);
+    document.getElementById('modal').classList.add('show');
+  },
+  closeModal() { document.getElementById('modal').classList.remove('show'); },
+
+  confirmReset() {
+    this.openModal(
+      State.lang==='ar' ? 'إعادة ضبط البيانات' : 'Reset Data',
+      `<p>${State.lang==='ar'?'سيتم حذف كل البيانات الحالية واستعادة البيانات التجريبية. متابعة؟':'All current data will be erased and demo data restored. Continue?'}</p>`,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-danger" onclick="State.reset();App.closeModal();App.logout()">${State.lang==='ar'?'إعادة الضبط':'Reset'}</button>`
+    );
+  },
+
+  // ============ LIVE SIMULATION ============
+  startLive() {
+    this.stopLive();
+    this.liveTimer = setInterval(() => {
+      // Simulate slight production progress on running stations
+      const k1 = Q.station('K1');
+      const k2 = Q.station('K2');
+      if (k1.status === 'running' && k1.produced < k1.target) {
+        const inc = Math.floor(Math.random() * 12) + 4;
+        k1.produced = Math.min(k1.target, k1.produced + inc);
+      }
+      if (k2.status === 'running' && k2.produced < k1.produced - 50) {
+        const inc = Math.floor(Math.random() * 10) + 3;
+        k2.produced = Math.min(k1.produced - 50, k2.produced + inc);
+      }
+      // Advance dashboard if it's the active page
+      if (State.route === 'dashboard') View.refreshDashboard();
+      if (State.route === 'floor') View.refreshFloor();
+    }, 3000);
+  },
+  stopLive() { if (this.liveTimer) clearInterval(this.liveTimer); this.liveTimer = null; },
+};
+
+/* ============ VIEWS ============ */
+const View = {
+
+  // ─────── LIVE DASHBOARD ───────
+  dashboard() {
+    const wos = State.data.workOrders;
+    const active = wos.filter(w => w.currentStage !== 'DELIVERED' && w.currentStage !== 'REJECTED');
+    const delivered = wos.filter(w => w.currentStage === 'DELIVERED');
+    const totalProduced = wos.reduce((s,w) => s + (w.produced||0), 0);
+    const totalScrap = wos.reduce((s,w) => s + (w.scrap||0), 0);
+    const scrapRate = totalProduced > 0 ? (totalScrap / (totalProduced + totalScrap)) * 100 : 0;
+    const inMOC = wos.filter(w => w.currentStage === 'AT_MOC').length;
+    const stationsRunning = State.data.stations.filter(s => s.status === 'running').length;
+
+    const ar = State.lang === 'ar';
+
+    document.getElementById('content').innerHTML = `
+      <div class="page-header">
+        <div>
+          <div class="page-title">${ar?'لوحة التحكم اللايف':'Live Dashboard'}</div>
+          <div class="page-sub">${ar?'مراقبة حية لخط الإنتاج بالكامل — تتحدث كل 3 ثوان':'Real-time monitoring of the entire production line — refreshes every 3s'}</div>
+        </div>
+        <div class="page-actions">
+          ${Perm.canAct('PROD') ? `<button class="btn btn-primary" onclick="Action.createWO()"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>${t('create_wo')}</button>` : ''}
+        </div>
+      </div>
+
+      <div class="kpi-grid" id="kpiGrid">${this.kpiHTML(active.length, totalProduced, scrapRate, inMOC, stationsRunning, delivered.length)}</div>
+
+      <div class="pipeline" id="pipeline">${this.pipelineHTML()}</div>
+
+      <div class="grid-2-1">
+        <div class="card">
+          <div class="card-title">${ar?'حالة المحطات الآن':'Stations — Live Status'}</div>
+          <div class="station-grid" id="stationGrid">${this.stationsHTML()}</div>
+        </div>
+        <div class="ticker" id="ticker">
+          <div class="ticker-head">
+            <span>${ar?'حركة لايف':'Live Activity'}</span>
+            <span class="live-pill" style="font-size:10px;color:var(--text-3)">${ar?'مباشر':'live'}</span>
+          </div>
+          <div class="ticker-list" id="tickerList">${this.tickerHTML()}</div>
+        </div>
+      </div>
+
+      <div class="card mt-2">
+        <div class="card-title">${ar?'أوامر الشغل النشطة':'Active Work Orders'}</div>
+        ${this.activeWOTable(active)}
+      </div>
+    `;
+  },
+
+  kpiHTML(activeCount, produced, scrapRate, inMOC, running, delivered) {
+    const ar = State.lang === 'ar';
+    const k = (label, val, accent, bg, sub) => `
+      <div class="kpi" style="--accent:${accent};--accent-bg:${bg}">
+        <div class="kpi-label">${label}</div>
+        <div class="kpi-value">${val}</div>
+        ${sub?`<div class="kpi-delta neutral">${sub}</div>`:''}
+      </div>`;
+    return [
+      k(ar?'WO نشط':'Active WO', activeCount, 'var(--gold)', 'rgba(245,185,66,0.1)', ar?'في الإنتاج الآن':'in production'),
+      k(ar?'إجمالي المنتج':'Total Produced', fmt.num(produced), 'var(--emerald)', 'rgba(16,185,129,0.1)', ar?'وحدة':'units'),
+      k(ar?'نسبة الـ Scrap':'Scrap Rate', fmt.pct(scrapRate,2), scrapRate>2?'var(--rose)':'var(--emerald)', scrapRate>2?'rgba(244,63,94,0.1)':'rgba(16,185,129,0.1)', scrapRate>2?(ar?'مرتفع':'high'):(ar?'ضمن الحد':'within target')),
+      k(ar?'بانتظار MOC':'Awaiting MOC', inMOC, 'var(--violet)', 'rgba(167,139,250,0.1)', ar?'دفعة':'batches'),
+      k(ar?'محطات شغّالة':'Running Stations', running + '/5', 'var(--sky)', 'rgba(56,189,248,0.1)', ar?'من 5':'of 5'),
+      k(ar?'تم تسليم':'Delivered', delivered, 'var(--teal)', 'rgba(20,184,166,0.1)', ar?'دفعة':'total'),
+    ].join('');
+  },
+
+  pipelineHTML() {
+    const counts = Q.woCountByStage();
+    const ar = State.lang === 'ar';
+    const stages = STAGE_ORDER.map(id => stageById(id));
+    const html = stages.map((s, i) => {
+      const c = counts[s.id];
+      const ownerId = Q.ownerOfStage(s.id);
+      const owner = ownerId ? Q.user(ownerId) : null;
+      const dept = Q.dept(s.dept);
+      const isActive = c > 0;
+      const hasFlow = c > 0 && i < stages.length - 1 && counts[stages[i+1]?.id] !== undefined;
+      return `<div class="stage ${isActive?'active':'idle'} ${hasFlow?'has-flow':''}" onclick="View.filterByStage('${s.id}')">
+        ${c > 0 ? `<div class="stage-count">${c}</div>` : ''}
+        <div class="stage-node">${s.code}</div>
+        <div class="stage-name">${escapeHTML(ar?s.name:s.nameEn)}</div>
+        ${owner ? `<div class="stage-user"><span class="ouser">${escapeHTML(owner.avatar)}</span> ${escapeHTML((ar?owner.name:owner.nameEn).split(' ').slice(0,2).join(' '))}</div>` : '<div class="stage-user">—</div>'}
+      </div>`;
+    }).join('');
+    return `
+      <div class="pipeline-head">
+        <div class="pipeline-title">${ar?'مسار الإنتاج المباشر':'Live Production Pipeline'}</div>
+        <div class="text-mute" style="font-size:11px">${ar?'كل مرحلة لها مسؤول مرتبط بقسمه':'Each stage has its responsible operator'}</div>
+      </div>
+      <div class="pipeline-stages">${html}</div>
+    `;
+  },
+
+  stationsHTML() {
+    const ar = State.lang === 'ar';
+    return State.data.stations.map(s => {
+      const op = Q.user(s.operatorId);
+      const pct = s.target > 0 ? Math.min(100, (s.produced / s.target) * 100) : 0;
+      return `<div class="station ${s.status}" onclick="Action.openStation('${s.id}')">
+        <div class="station-head">
+          <div class="station-code">${s.code}</div>
+          <div class="station-pulse"></div>
+        </div>
+        <div class="station-name">${escapeHTML(ar?s.name:s.nameEn)}</div>
+        <div class="station-stats">
+          <div>
+            <div class="station-stat-label">${ar?'مُنتج':'Produced'}</div>
+            <div class="station-stat-value">${fmt.num(s.produced)}</div>
+          </div>
+          <div>
+            <div class="station-stat-label">${ar?'الهدف':'Target'}</div>
+            <div class="station-stat-value">${fmt.num(s.target)}</div>
+          </div>
+        </div>
+        <div class="station-progress"><div class="station-progress-fill" style="width:${pct}%"></div></div>
+        <div class="station-operator">
+          <span class="user-avatar" style="width:18px;height:18px;font-size:9px;background:${op?.color||'#666'}">${op?.avatar||'?'}</span>
+          <span class="opname">${op ? escapeHTML((ar?op.name:op.nameEn).split(' ').slice(0,2).join(' ')) : '—'}</span>
+          <span style="margin-inline-start:auto" class="badge-status b-${s.status}">${s.status}</span>
+        </div>
+      </div>`;
+    }).join('');
+  },
+
+  tickerHTML() {
+    const items = State.data.movements.slice(0, 20);
+    if (!items.length) return `<div class="empty-state">${State.lang==='ar'?'لا توجد حركة بعد':'No movements yet'}</div>`;
+    const icons = { ok:'✓', warn:'⚠', err:'✕', info:'ℹ' };
+    return items.map(m => {
+      const u = Q.user(m.user);
+      return `<div class="ticker-item">
+        <div class="ticker-icon ${m.type}">${icons[m.type]||'•'}</div>
+        <div class="ticker-body">
+          <div class="ticker-msg">${escapeHTML(m.msg)}</div>
+          <div class="ticker-meta">
+            <span>${u ? escapeHTML(State.lang==='ar'?u.name.split(' ')[0]:u.nameEn.split(' ')[0]) : '—'}</span>
+            <span>·</span>
+            <span class="mono">${fmt.ago(m.ts)}</span>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  },
+
+  activeWOTable(wos) {
+    const ar = State.lang === 'ar';
+    if (!wos.length) return `<div class="empty-state">${ar?'لا توجد أوامر شغل نشطة':'No active work orders'}</div>`;
+    return `<div style="overflow-x:auto"><table class="data">
+      <thead><tr>
+        <th>${ar?'رقم WO':'WO #'}</th><th>${ar?'الكمية':'Qty'}</th><th>${ar?'المرحلة الحالية':'Current Stage'}</th>
+        <th>${ar?'المسؤول':'Owner'}</th><th>${ar?'التقدم':'Progress'}</th><th>${ar?'منذ':'Since'}</th><th></th>
+      </tr></thead>
+      <tbody>${wos.map(w => {
+        const st = stageById(w.currentStage);
+        const owner = w.currentOwner ? Q.user(w.currentOwner) : null;
+        const lastTs = w.history[w.history.length-1]?.ts;
+        const pct = w.qty > 0 ? Math.min(100, (w.produced / w.qty) * 100) : 0;
+        return `<tr class="clickable" onclick="Action.openWO('${w.id}')">
+          <td class="mono"><b>${w.id}</b></td>
+          <td class="mono">${fmt.num(w.qty)}</td>
+          <td><span class="badge-status b-progress">${escapeHTML(ar?st.name:st.nameEn)}</span></td>
+          <td>${owner?`<span style="display:inline-flex;align-items:center;gap:6px"><span class="user-avatar" style="width:20px;height:20px;font-size:10px;background:${owner.color}">${owner.avatar}</span>${escapeHTML((ar?owner.name:owner.nameEn).split(' ').slice(0,2).join(' '))}</span>`:'<span class="text-mute">—</span>'}</td>
+          <td><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;height:4px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;min-width:60px"><div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--gold),var(--gold-2))"></div></div><span class="mono" style="font-size:11px">${pct.toFixed(0)}%</span></div></td>
+          <td class="text-mute mono">${fmt.ago(lastTs)}</td>
+          <td><button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();Action.openWO('${w.id}')">${ar?'تفاصيل':'Details'}</button></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
+  },
+
+  refreshDashboard() {
+    const wos = State.data.workOrders;
+    const active = wos.filter(w => w.currentStage !== 'DELIVERED' && w.currentStage !== 'REJECTED');
+    const delivered = wos.filter(w => w.currentStage === 'DELIVERED').length;
+    const totalProduced = wos.reduce((s,w) => s + (w.produced||0), 0);
+    const totalScrap = wos.reduce((s,w) => s + (w.scrap||0), 0);
+    const scrapRate = totalProduced > 0 ? (totalScrap / (totalProduced + totalScrap)) * 100 : 0;
+    const inMOC = wos.filter(w => w.currentStage === 'AT_MOC').length;
+    const running = State.data.stations.filter(s => s.status === 'running').length;
+    const kg = document.getElementById('kpiGrid');
+    if (kg) kg.innerHTML = this.kpiHTML(active.length, totalProduced, scrapRate, inMOC, running, delivered);
+    const sg = document.getElementById('stationGrid');
+    if (sg) sg.innerHTML = this.stationsHTML();
+    const pl = document.getElementById('pipeline');
+    if (pl) pl.innerHTML = this.pipelineHTML();
+  },
+
+  filterByStage(stageId) {
+    State.route = 'workorders';
+    this.workorders(stageId);
+  },
+};
+
+/* ============ MORE VIEWS ============ */
+
+// ─────── MY TASKS ───────
+View.mytasks = function() {
+  const ar = State.lang === 'ar';
+  const tasks = Q.myTasks();
+  const dept = Q.dept(State.user.dept);
+  document.getElementById('content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">${ar?'مهامي':'My Tasks'}</div>
+        <div class="page-sub">${ar?'كل مهام تخص قسمك مباشرة':'All tasks assigned to your department'}</div>
+      </div>
+      <div>
+        <span class="dept-tag" style="--dept-color:${dept.color};--dept-bg:${dept.bg};font-size:12px;padding:5px 10px">
+          ${escapeHTML(ar?dept.name:dept.nameEn)} · ${tasks.length} ${ar?'مهمة':'tasks'}
+        </span>
+      </div>
+    </div>
+
+    ${tasks.length === 0 ? `<div class="card"><div class="empty-state">${ar?'لا توجد مهام لك حالياً 🎉':'No tasks for you right now 🎉'}</div></div>` : ''}
+
+    <div class="grid-3" style="margin-top:0">
+      ${tasks.map(({wo, stage}) => {
+        const action = View.actionForStage(stage.id, wo);
+        const lastEntry = wo.history[wo.history.length-1];
+        return `<div class="task-card ${wo.priority==='high'?'urgent':''}">
+          <div class="flex justify-between items-center">
+            <span class="mono" style="font-weight:700;font-size:13px">${wo.id}</span>
+            <span class="badge-status b-${wo.priority==='high'?'rejected':wo.priority==='medium'?'pending':'closed'}">${wo.priority}</span>
+          </div>
+          <div style="font-size:12px;color:var(--text-2)">${escapeHTML(wo.desc)}</div>
+          <div class="flex" style="gap:14px;font-size:11px;flex-wrap:wrap">
+            <div><span class="text-mute">${ar?'كمية:':'Qty:'}</span> <span class="mono">${fmt.num(wo.qty)}</span></div>
+            <div><span class="text-mute">${ar?'مُنتج:':'Produced:'}</span> <span class="mono">${fmt.num(wo.produced)}</span></div>
+            <div><span class="text-mute">${ar?'منذ:':'Since:'}</span> <span class="mono">${fmt.ago(lastEntry?.ts)}</span></div>
+          </div>
+          <div class="flex" style="gap:6px;margin-top:6px">
+            <button class="btn btn-sm btn-secondary" style="flex:1" onclick="Action.openWO('${wo.id}')">${ar?'فتح التفاصيل':'View Details'}</button>
+            ${action ? `<button class="btn btn-sm btn-primary" onclick="${action.handler}">${escapeHTML(action.label)}</button>` : ''}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+};
+
+View.actionForStage = function(stageId, wo) {
+  const ar = State.lang === 'ar';
+  const map = {
+    CREATED:     { label: ar?'طلب المواد':'Request Materials',   handler: `Action.requestMaterials('${wo.id}')` },
+    MAT_REQUEST: { label: ar?'صرف المواد':'Issue Materials',     handler: `Action.issueMaterials('${wo.id}')` },
+    MAT_ISSUED:  { label: ar?'بدء K1':'Start K1',                handler: `Action.startStation('${wo.id}','K1')` },
+    AT_K1:       { label: ar?'تسليم K2':'Handover to K2',        handler: `Action.handover('${wo.id}','AT_K2')` },
+    AT_K2:       { label: ar?'تسليم K3':'Handover to K3',        handler: `Action.handover('${wo.id}','AT_K3')` },
+    AT_K3:       { label: ar?'تسليم K4':'Handover to K4',        handler: `Action.handover('${wo.id}','AT_K4')` },
+    AT_K4:       { label: ar?'تسليم MOC':'Handover to MOC',      handler: `Action.handover('${wo.id}','AT_MOC')` },
+    AT_MOC:      { label: ar?'فحص MOC':'MOC Check',              handler: `Action.mocCheck('${wo.id}')` },
+    AT_PMF:      { label: ar?'نقل GDN':'Move to GDN',            handler: `Action.handover('${wo.id}','AT_GDN')` },
+    AT_GDN:      { label: ar?'تسليم نهائي':'Deliver',            handler: `Action.handover('${wo.id}','DELIVERED','deliver')` },
+  };
+  return map[stageId];
+};
+
+// ─────── PRODUCTION FLOOR ───────
+View.floor = function() {
+  const ar = State.lang === 'ar';
+  document.getElementById('content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">${ar?'أرضية الإنتاج':'Production Floor'}</div>
+        <div class="page-sub">${ar?'حالة المحطات K1 إلى K4 + MOC':'Status of K1–K4 stations + MOC'}</div>
+      </div>
+    </div>
+    <div class="station-grid" id="floorStations">${View.stationsHTML()}</div>
+  `;
+};
+View.refreshFloor = function() {
+  const el = document.getElementById('floorStations');
+  if (el) el.innerHTML = View.stationsHTML();
+};
+
+// ─────── WORK ORDERS ───────
+View.workorders = function(filterStage) {
+  const ar = State.lang === 'ar';
+  let wos = State.data.workOrders.slice();
+  if (filterStage) wos = wos.filter(w => w.currentStage === filterStage);
+
+  document.getElementById('content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">${ar?'أوامر الشغل':'Work Orders'}${filterStage?` — ${escapeHTML(stageById(filterStage)?.[ar?'name':'nameEn'])}`:''}</div>
+        <div class="page-sub">${ar?'جميع أوامر الشغل في النظام':'All work orders in the system'}</div>
+      </div>
+      <div class="page-actions">
+        ${filterStage?`<button class="btn btn-secondary btn-sm" onclick="App.goto('workorders')">${ar?'إلغاء الفلتر':'Clear filter'}</button>`:''}
+        ${Perm.canAct('PROD') ? `<button class="btn btn-primary" onclick="Action.createWO()"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>${t('create_wo')}</button>` : ''}
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <div class="table-toolbar">
+        <input class="search-input" placeholder="${ar?'بحث برقم WO أو SKU':'Search WO or SKU'}" id="woSearch" oninput="View.filterWOs()">
+        <select class="filter-select" id="woStageFilter" onchange="View.filterWOs()">
+          <option value="">${ar?'كل المراحل':'All stages'}</option>
+          ${STAGES.map(s => `<option value="${s.id}" ${s.id===filterStage?'selected':''}>${escapeHTML(ar?s.name:s.nameEn)}</option>`).join('')}
+        </select>
+      </div>
+      <div style="overflow-x:auto" id="woTableContainer">${View.woTableHTML(wos)}</div>
+    </div>
+  `;
+};
+
+View.woTableHTML = function(wos) {
+  const ar = State.lang === 'ar';
+  if (!wos.length) return `<div class="empty-state">${ar?'لا توجد أوامر شغل':'No work orders'}</div>`;
+  return `<table class="data">
+    <thead><tr>
+      <th>${ar?'رقم WO':'WO #'}</th><th>${ar?'الوصف':'Description'}</th><th>${ar?'الكمية':'Qty'}</th>
+      <th>${ar?'المرحلة':'Stage'}</th><th>${ar?'المسؤول':'Owner'}</th><th>${ar?'الأولوية':'Priority'}</th>
+      <th>${ar?'تاريخ الإنشاء':'Created'}</th><th></th>
+    </tr></thead>
+    <tbody>${wos.map(w => {
+      const st = stageById(w.currentStage);
+      const owner = w.currentOwner ? Q.user(w.currentOwner) : null;
+      const isDone = w.currentStage === 'DELIVERED';
+      const isRej = w.currentStage === 'REJECTED';
+      const cls = isDone ? 'b-done' : isRej ? 'b-rejected' : 'b-progress';
+      return `<tr class="clickable" onclick="Action.openWO('${w.id}')">
+        <td class="mono"><b>${w.id}</b></td>
+        <td>${escapeHTML(w.desc)}</td>
+        <td class="mono">${fmt.num(w.qty)}</td>
+        <td><span class="badge-status ${cls}">${escapeHTML(ar?st.name:st.nameEn)}</span></td>
+        <td>${owner?`<span style="display:inline-flex;align-items:center;gap:6px"><span class="user-avatar" style="width:20px;height:20px;font-size:10px;background:${owner.color}">${owner.avatar}</span>${escapeHTML((ar?owner.name:owner.nameEn).split(' ').slice(0,2).join(' '))}</span>`:'<span class="text-mute">—</span>'}</td>
+        <td><span class="badge-status b-${w.priority==='high'?'rejected':w.priority==='medium'?'pending':'closed'}">${w.priority}</span></td>
+        <td class="mono text-mute">${fmt.ago(w.createdAt)}</td>
+        <td><button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();Action.openWO('${w.id}')">${ar?'فتح':'Open'}</button></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+};
+
+View.filterWOs = function() {
+  const q = (document.getElementById('woSearch').value || '').toLowerCase().trim();
+  const stage = document.getElementById('woStageFilter').value;
+  let wos = State.data.workOrders.slice();
+  if (stage) wos = wos.filter(w => w.currentStage === stage);
+  if (q) wos = wos.filter(w => w.id.toLowerCase().includes(q) || w.sku.toLowerCase().includes(q) || w.desc.toLowerCase().includes(q));
+  document.getElementById('woTableContainer').innerHTML = View.woTableHTML(wos);
+};
+
+// ─────── WAREHOUSES ───────
+View.warehouses = function() {
+  const ar = State.lang === 'ar';
+  const userDept = State.user.dept;
+  const isMgr = Perm.isManager();
+  const visible = isMgr ? State.data.warehouses : State.data.warehouses.filter(w => w.dept === userDept);
+
+  document.getElementById('content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">${ar?'المستودعات':'Warehouses'}</div>
+        <div class="page-sub">${ar?'حركة المخزون عبر مستودعات Raw → IFA → PMF → GDN':'Stock flow across Raw → IFA → PMF → GDN warehouses'}</div>
+      </div>
+    </div>
+    ${visible.map(wh => {
+      const mgr = Q.user(wh.managerId);
+      const dept = Q.dept(wh.dept);
+      const totalQty = wh.items.reduce((s,i) => s + i.qty, 0);
+      const totalAlloc = wh.items.reduce((s,i) => s + i.allocated, 0);
+      return `<div class="card mb-2">
+        <div class="flex justify-between items-center mb-2 flex-wrap gap-2">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700">
+              <span class="dept-tag" style="--dept-color:${dept.color};--dept-bg:${dept.bg};font-size:11px;padding:3px 8px">${escapeHTML(wh.code)}</span>
+              ${escapeHTML(ar?wh.name:wh.nameEn)}
+            </div>
+            <div class="text-mute mt-1" style="font-size:11.5px">${ar?'أمين المستودع:':'Manager:'} <b style="color:var(--text-2)">${escapeHTML(mgr?(ar?mgr.name:mgr.nameEn):'—')}</b></div>
+          </div>
+          <div class="flex" style="gap:18px;font-size:11.5px">
+            <div><div class="text-mute">${ar?'إجمالي المخزون':'Total Stock'}</div><div class="mono" style="font-size:16px;font-weight:700">${fmt.num(totalQty)}</div></div>
+            <div><div class="text-mute">${ar?'مخصص':'Allocated'}</div><div class="mono" style="font-size:16px;font-weight:700;color:var(--amber)">${fmt.num(totalAlloc)}</div></div>
+            <div><div class="text-mute">${ar?'متاح':'Available'}</div><div class="mono" style="font-size:16px;font-weight:700;color:var(--emerald)">${fmt.num(totalQty - totalAlloc)}</div></div>
+          </div>
+        </div>
+        <div style="overflow-x:auto"><table class="data">
+          <thead><tr><th>SKU</th><th>${ar?'الصنف':'Item'}</th><th>${ar?'الكمية':'Qty'}</th><th>${ar?'مخصص':'Allocated'}</th><th>${ar?'متاح':'Available'}</th><th>${ar?'الوحدة':'Unit'}</th></tr></thead>
+          <tbody>${wh.items.map(it => `<tr>
+            <td class="mono">${escapeHTML(it.sku)}</td>
+            <td>${escapeHTML(it.name)}</td>
+            <td class="mono">${fmt.num(it.qty)}</td>
+            <td class="mono text-mute">${fmt.num(it.allocated)}</td>
+            <td class="mono text-emerald">${fmt.num(it.qty - it.allocated)}</td>
+            <td class="text-mute">${escapeHTML(it.unit)}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>`;
+    }).join('')}
+  `;
+};
+
+// ─────── QUALITY (MOC) ───────
+View.quality = function() {
+  const ar = State.lang === 'ar';
+  const pending = State.data.workOrders.filter(w => w.currentStage === 'AT_MOC');
+  const recent = State.data.workOrders.filter(w => w.history.some(h => h.action === 'accept' || h.action === 'reject')).slice(0, 10);
+  document.getElementById('content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">${ar?'الجودة (MOC)':'Quality (MOC)'}</div>
+        <div class="page-sub">${ar?'فحص نهاية الإنتاج — قبول أو رفض الدفعات':'Final product control — accept or reject batches'}</div>
+      </div>
+    </div>
+    <div class="card mb-2">
+      <div class="card-title">${ar?'بانتظار فحص MOC':'Awaiting MOC Inspection'} (${pending.length})</div>
+      ${pending.length === 0 ? `<div class="empty-state">${ar?'لا توجد دفعات بانتظار الفحص':'No batches awaiting inspection'}</div>` : `
+        <div style="overflow-x:auto"><table class="data">
+          <thead><tr><th>WO</th><th>${ar?'الكمية':'Qty'}</th><th>${ar?'مُنتج':'Produced'}</th><th>${ar?'Scrap':'Scrap'}</th><th>${ar?'منذ':'Since'}</th><th></th></tr></thead>
+          <tbody>${pending.map(w => `<tr>
+            <td class="mono"><b>${w.id}</b></td>
+            <td class="mono">${fmt.num(w.qty)}</td>
+            <td class="mono">${fmt.num(w.produced)}</td>
+            <td class="mono">${fmt.num(w.scrap)}</td>
+            <td class="text-mute mono">${fmt.ago(w.history[w.history.length-1]?.ts)}</td>
+            <td>
+              ${Perm.canAct('QC') ? `<button class="btn btn-sm btn-success" onclick="Action.mocCheck('${w.id}')">${t('moc_check')}</button>` : `<span class="text-mute" style="font-size:11px">${ar?'صلاحية QC':'QC only'}</span>`}
+            </td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+      `}
+    </div>
+    <div class="card">
+      <div class="card-title">${ar?'فحوصات سابقة':'Recent Inspections'}</div>
+      ${recent.length === 0 ? `<div class="empty-state">${ar?'لا توجد':'None'}</div>` : `
+        <div style="overflow-x:auto"><table class="data">
+          <thead><tr><th>WO</th><th>${ar?'النتيجة':'Result'}</th><th>${ar?'الكمية':'Qty'}</th><th>${ar?'المفتش':'Inspector'}</th><th>${ar?'تاريخ':'Date'}</th></tr></thead>
+          <tbody>${recent.map(w => {
+            const mocEntry = w.history.find(h => h.stage === 'AT_PMF' && h.action === 'accept') || w.history.find(h => h.stage === 'REJECTED');
+            if (!mocEntry) return '';
+            const inspector = Q.user(mocEntry.fromUser);
+            const accepted = mocEntry.stage === 'AT_PMF';
+            return `<tr><td class="mono"><b>${w.id}</b></td>
+              <td><span class="badge-status ${accepted?'b-active':'b-rejected'}">${accepted?(ar?'مقبول':'Accepted'):(ar?'مرفوض':'Rejected')}</span></td>
+              <td class="mono">${fmt.num(mocEntry.qty)}</td>
+              <td>${inspector?escapeHTML(ar?inspector.name:inspector.nameEn):'—'}</td>
+              <td class="mono text-mute">${fmt.date(mocEntry.ts)}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+      `}
+    </div>
+  `;
+};
+
+// ─────── MAINTENANCE ───────
+View.maintenance = function() {
+  const ar = State.lang === 'ar';
+  const open = State.data.maintenance.filter(m => m.status !== 'completed');
+  const closed = State.data.maintenance.filter(m => m.status === 'completed');
+  document.getElementById('content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">${ar?'الصيانة':'Maintenance'}</div>
+        <div class="page-sub">${ar?'طلبات الصيانة — استلام وتنفيذ وإغلاق':'Service requests — request, execute, close'}</div>
+      </div>
+      <div class="page-actions">
+        ${(Perm.canAct('PROD')||Perm.canAct('MAINT'))?`<button class="btn btn-primary" onclick="Action.requestMaint()"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>${t('request_maint')}</button>`:''}
+      </div>
+    </div>
+    <div class="card mb-2">
+      <div class="card-title">${ar?'طلبات مفتوحة':'Open Requests'} (${open.length})</div>
+      ${open.length === 0 ? `<div class="empty-state">${ar?'لا توجد طلبات مفتوحة':'No open requests'}</div>` : `
+        <div style="overflow-x:auto"><table class="data">
+          <thead><tr><th>${ar?'الرقم':'#'}</th><th>${ar?'المحطة':'Station'}</th><th>${ar?'العنوان':'Title'}</th><th>${ar?'الأولوية':'Priority'}</th><th>${ar?'الفني':'Tech'}</th><th>${ar?'الحالة':'Status'}</th><th>${ar?'منذ':'Since'}</th><th></th></tr></thead>
+          <tbody>${open.map(m => {
+            const tech = Q.user(m.assignedTo);
+            const reqr = Q.user(m.requestedBy);
+            return `<tr>
+              <td class="mono"><b>${m.id}</b></td>
+              <td><span class="tag">${m.stationId}</span></td>
+              <td>${escapeHTML(m.title)}<div class="text-mute" style="font-size:11px">${escapeHTML(m.desc||'')}</div></td>
+              <td><span class="badge-status b-${m.priority==='high'?'rejected':m.priority==='medium'?'pending':'closed'}">${m.priority}</span></td>
+              <td>${tech?escapeHTML(ar?tech.name:tech.nameEn):'—'}</td>
+              <td><span class="badge-status b-${m.status==='in_progress'?'progress':'pending'}">${m.status}</span></td>
+              <td class="mono text-mute">${fmt.ago(m.requestedAt)}</td>
+              <td>${Perm.canAct('MAINT')?`<button class="btn btn-sm btn-success" onclick="Action.completeMaint('${m.id}')">${ar?'إنهاء':'Complete'}</button>`:''}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+      `}
+    </div>
+    ${closed.length ? `<div class="card">
+      <div class="card-title">${ar?'مغلقة':'Closed'} (${closed.length})</div>
+      <div style="overflow-x:auto"><table class="data">
+        <thead><tr><th>${ar?'الرقم':'#'}</th><th>${ar?'المحطة':'Station'}</th><th>${ar?'العنوان':'Title'}</th><th>${ar?'تاريخ الإنجاز':'Completed'}</th></tr></thead>
+        <tbody>${closed.map(m=>`<tr><td class="mono">${m.id}</td><td><span class="tag">${m.stationId}</span></td><td>${escapeHTML(m.title)}</td><td class="mono text-mute">${fmt.date(m.completedAt)}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </div>` : ''}
+  `;
+};
+
+// ─────── TRACEABILITY ───────
+View.trace = function() {
+  const ar = State.lang === 'ar';
+  document.getElementById('content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">${ar?'التتبع الكامل':'Full Traceability'}</div>
+        <div class="page-sub">${ar?'تتبع رحلة أي WO من المواد الخام إلى التسليم':'Trace any WO from raw materials to delivery'}</div>
+      </div>
+    </div>
+    <div class="card mb-2">
+      <div class="flex" style="gap:8px;flex-wrap:wrap">
+        <input class="search-input" id="traceQuery" placeholder="${ar?'أدخل رقم WO (مثال: WO-2026-0042)':'Enter WO ID (e.g. WO-2026-0042)'}" style="width:300px" oninput="View.runTrace()">
+        <select class="filter-select" id="traceSelect" onchange="document.getElementById('traceQuery').value=this.value;View.runTrace()">
+          <option value="">${ar?'أو اختر من القائمة':'Or pick from list'}</option>
+          ${State.data.workOrders.map(w=>`<option value="${w.id}">${w.id} — ${escapeHTML(w.desc)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div id="traceResult"></div>
+  `;
+};
+
+View.runTrace = function() {
+  const ar = State.lang === 'ar';
+  const q = (document.getElementById('traceQuery').value||'').trim();
+  const wo = State.data.workOrders.find(w => w.id.toLowerCase() === q.toLowerCase());
+  const el = document.getElementById('traceResult');
+  if (!q) { el.innerHTML = ''; return; }
+  if (!wo) { el.innerHTML = `<div class="card"><div class="empty-state">${ar?'لم يتم العثور على WO':'WO not found'}</div></div>`; return; }
+  const cur = STAGE_ORDER.indexOf(wo.currentStage);
+  el.innerHTML = `
+    <div class="card mb-2">
+      <div class="flex justify-between items-center mb-2 flex-wrap gap-2">
+        <div>
+          <div class="mono" style="font-size:18px;font-weight:700">${wo.id}</div>
+          <div class="text-mute" style="font-size:12px">${escapeHTML(wo.desc)}</div>
+        </div>
+        <div class="flex" style="gap:14px;font-size:12px">
+          <div><div class="text-mute">${ar?'الكمية':'Qty'}</div><div class="mono" style="font-weight:700">${fmt.num(wo.qty)}</div></div>
+          <div><div class="text-mute">${ar?'منتج':'Produced'}</div><div class="mono" style="font-weight:700;color:var(--emerald)">${fmt.num(wo.produced)}</div></div>
+          <div><div class="text-mute">Scrap</div><div class="mono" style="font-weight:700;color:var(--rose)">${fmt.num(wo.scrap)}</div></div>
+          <div><div class="text-mute">${ar?'الحالة':'Status'}</div><div><span class="badge-status b-${wo.currentStage==='DELIVERED'?'done':wo.currentStage==='REJECTED'?'rejected':'progress'}">${escapeHTML(stageById(wo.currentStage)?.[ar?'name':'nameEn'])}</span></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">${ar?'الرحلة الكاملة':'Full Journey'} (${wo.history.length} ${ar?'حركة':'events'})</div>
+      ${wo.history.map((h,i) => {
+        const st = stageById(h.stage);
+        const fromU = h.fromUser ? Q.user(h.fromUser) : null;
+        const toU = h.toUser ? Q.user(h.toUser) : null;
+        const isLast = i === wo.history.length - 1;
+        const cls = h.stage === 'REJECTED' ? 'rejected' : (isLast && wo.currentStage !== 'DELIVERED' ? 'current' : 'done');
+        return `<div class="trace-step ${cls}">
+          <div class="trace-dot">${st?.code||'?'}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:13px">${escapeHTML(st?(ar?st.name:st.nameEn):h.stage)}</div>
+            <div class="text-mute" style="font-size:11.5px;margin-top:3px">
+              ${fromU?`<span style="color:var(--text-2)">${escapeHTML((ar?fromU.name:fromU.nameEn))}</span>`:''}
+              ${toU?` → <span style="color:var(--text-2)">${escapeHTML((ar?toU.name:toU.nameEn))}</span>`:''}
+              ${h.qty!=null?` · <span class="mono">${fmt.num(h.qty)} ${ar?'قطعة':'pcs'}</span>`:''}
+              ${h.scrap?` · <span class="mono text-rose">${fmt.num(h.scrap)} scrap</span>`:''}
+            </div>
+            ${h.notes?`<div class="text-mute" style="font-size:11px;margin-top:3px;font-style:italic">"${escapeHTML(h.notes)}"</div>`:''}
+          </div>
+          <div class="text-mute mono" style="font-size:11px;text-align:end;flex-shrink:0">
+            ${fmt.date(h.ts)}<br><span style="font-size:10px">${fmt.ago(h.ts)}</span>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+};
+
+// ─────── AUDIT LOG ───────
+View.audit = function() {
+  const ar = State.lang === 'ar';
+  document.getElementById('content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">${ar?'سجل التدقيق':'Audit Log'}</div>
+        <div class="page-sub">${ar?'سجل لا يُعدّل لكل عملية في النظام':'Append-only log of every action in the system'}</div>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-secondary btn-sm" onclick="window.print()">${ar?'طباعة':'Print'}</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">${State.data.audit.length} ${ar?'حركة مسجّلة':'recorded events'}</div>
+      <div>${State.data.audit.slice(0,200).map(a => {
+        const u = Q.user(a.user);
+        return `<div class="audit-row">
+          <div class="audit-time">${fmt.date(a.ts)}</div>
+          <div class="audit-msg"><b>${escapeHTML(a.action)}</b> · ${escapeHTML(a.entity)} <span class="mono">${escapeHTML(a.entityId||'')}</span> ${a.details?`<span class="text-mute">— ${escapeHTML(JSON.stringify(a.details))}</span>`:''}</div>
+          <div class="audit-user">${u?`<span class="user-avatar" style="width:18px;height:18px;font-size:9px;background:${u.color};display:inline-flex;vertical-align:middle">${u.avatar}</span> ${escapeHTML(ar?u.name:u.nameEn)}`:'—'}</div>
+        </div>`;
+      }).join('')}</div>
+    </div>
+  `;
+};
+
+// ─────── ADMIN (departments / users / stations) ───────
+// ─────── ADMIN — Tabbed editor ───────
+View.adminTab = 'users';
+View.admin = function() {
+  const ar = State.lang === 'ar';
+  const tabs = [
+    { id: 'users',     label: ar?'المستخدمون':'Users',         icon: '👤' },
+    { id: 'depts',     label: ar?'الأقسام':'Departments',      icon: '🏢' },
+    { id: 'stations',  label: ar?'المحطات':'Stations',         icon: '⚙' },
+    { id: 'workflow',  label: ar?'مراحل الإنتاج':'Workflow',   icon: '↦' },
+    { id: 'backup',    label: ar?'النسخ الاحتياطي':'Backup',   icon: '⤓' },
+  ];
+  document.getElementById('content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">${ar?'الإدارة':'Admin'}</div>
+        <div class="page-sub">${ar?'تحرير المستخدمين والأقسام والمحطات وإعدادات النظام':'Edit users, departments, stations, and system settings'}</div>
+      </div>
+      <div class="page-actions">
+        <span style="font-size:11px;color:var(--text-3);align-self:center">${ar?'كل تعديل يُسجّل في سجل التدقيق':'All edits logged to audit'}</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap">
+      ${tabs.map(tab => `<button class="btn ${View.adminTab===tab.id?'btn-primary':'btn-secondary'} btn-sm" onclick="View.adminTab='${tab.id}';View.admin()">${tab.icon} ${escapeHTML(tab.label)}</button>`).join('')}
+    </div>
+    <div id="adminBody"></div>
+  `;
+  ({
+    users: View.adminUsers, depts: View.adminDepts, stations: View.adminStations,
+    workflow: View.adminWorkflow, backup: View.adminBackup,
+  })[View.adminTab]();
+};
+
+View.adminUsers = function() {
+  const ar = State.lang === 'ar';
+  document.getElementById('adminBody').innerHTML = `
+    <div class="card">
+      <div class="card-title">
+        <span>${ar?'المستخدمون':'Users'} (${State.data.users.length})</span>
+        <button class="btn btn-primary btn-sm" onclick="Action.editUser()"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>${ar?'مستخدم جديد':'Add User'}</button>
+      </div>
+      <div style="overflow-x:auto"><table class="data">
+        <thead><tr><th>ID</th><th>${ar?'الاسم':'Name'}</th><th>${ar?'الاسم EN':'Name EN'}</th><th>${ar?'القسم':'Dept'}</th><th>${ar?'الدور':'Role'}</th><th></th></tr></thead>
+        <tbody>${State.data.users.map(u=>{
+          const d = Q.dept(u.dept);
+          return `<tr>
+            <td class="mono">${u.id}</td>
+            <td><span style="display:inline-flex;align-items:center;gap:8px"><span class="user-avatar" style="width:24px;height:24px;font-size:11px;background:${u.color}">${u.avatar}</span>${escapeHTML(u.name)}</span></td>
+            <td>${escapeHTML(u.nameEn)}</td>
+            <td><span class="dept-tag" style="--dept-color:${d.color};--dept-bg:${d.bg}">${escapeHTML(ar?d.name:d.nameEn)}</span></td>
+            <td>${escapeHTML(ar?u.role:u.roleEn)}</td>
+            <td style="white-space:nowrap">
+              <button class="btn btn-sm btn-secondary" onclick="Action.editUser('${u.id}')">${ar?'تعديل':'Edit'}</button>
+              ${u.id !== State.user.id ? `<button class="btn btn-sm btn-danger" onclick="Action.deleteUser('${u.id}')">${ar?'حذف':'Delete'}</button>` : `<span class="text-mute" style="font-size:10px;padding:0 6px">${ar?'(أنت)':'(you)'}</span>`}
+            </td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+    </div>
+  `;
+};
+
+View.adminDepts = function() {
+  const ar = State.lang === 'ar';
+  document.getElementById('adminBody').innerHTML = `
+    <div class="card">
+      <div class="card-title">${ar?'الأقسام':'Departments'} — ${ar?'8 أقسام محددة في النظام':'8 fixed system departments'}</div>
+      <p style="font-size:11.5px;color:var(--text-3);margin-bottom:14px">${ar?'لا يمكن إضافة/حذف الأقسام لأنها مرتبطة بمنطق سير العمل. يمكنك تعديل الاسم واللون فقط.':'Departments cannot be added/removed — they\'re tied to workflow logic. You can edit name and color only.'}</p>
+      <div class="grid-2">
+        ${Object.values(State.data.departments).map(d => {
+          const users = Q.usersOf(d.id);
+          return `<div style="background:var(--glass-2);border:1px solid var(--border);border-radius:10px;padding:14px">
+            <div class="flex justify-between items-center mb-1">
+              <span class="dept-tag" style="--dept-color:${d.color};--dept-bg:${d.bg};font-size:12px;padding:4px 10px">${escapeHTML(ar?d.name:d.nameEn)}</span>
+              <button class="btn btn-sm btn-secondary" onclick="Action.editDept('${d.id}')">${ar?'تعديل':'Edit'}</button>
+            </div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:6px">ID: <span class="mono">${d.id}</span> · ${users.length} ${ar?'مستخدم':'users'}</div>
+            <div style="font-size:11px;color:var(--text-2);margin-top:4px">${users.map(u=>escapeHTML(u.name)).join('، ')||'—'}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+  `;
+};
+
+View.adminStations = function() {
+  const ar = State.lang === 'ar';
+  document.getElementById('adminBody').innerHTML = `
+    <div class="card">
+      <div class="card-title">${ar?'المحطات والمشغّلون':'Stations & Operators'}</div>
+      <p style="font-size:11.5px;color:var(--text-3);margin-bottom:14px">${ar?'5 محطات ثابتة (K1, K2, K3, K4, MOC). يمكن تعديل الأسماء وتعيين المشغّل.':'5 fixed stations (K1, K2, K3, K4, MOC). You can edit names and assign operators.'}</p>
+      <div style="overflow-x:auto"><table class="data">
+        <thead><tr><th>${ar?'الكود':'Code'}</th><th>${ar?'الاسم':'Name'}</th><th>${ar?'الاسم EN':'Name EN'}</th><th>${ar?'المشغّل المعيّن':'Assigned Operator'}</th><th>${ar?'الحالة':'Status'}</th><th></th></tr></thead>
+        <tbody>${State.data.stations.map(s=>{
+          const op = Q.user(s.operatorId);
+          return `<tr><td class="mono"><b>${s.code}</b></td>
+          <td>${escapeHTML(s.name)}</td>
+          <td>${escapeHTML(s.nameEn)}</td>
+          <td>${op?`<span style="display:inline-flex;align-items:center;gap:6px"><span class="user-avatar" style="width:22px;height:22px;font-size:10px;background:${op.color}">${op.avatar}</span>${escapeHTML(ar?op.name:op.nameEn)}</span>`:'<span class="text-mute">—</span>'}</td>
+          <td><span class="badge-status b-${s.status}">${s.status}</span></td>
+          <td><button class="btn btn-sm btn-secondary" onclick="Action.editStation('${s.id}')">${ar?'تعديل':'Edit'}</button></td></tr>`;
+        }).join('')}</tbody>
+      </table></div>
+    </div>
+  `;
+};
+
+View.adminWorkflow = function() {
+  const ar = State.lang === 'ar';
+  document.getElementById('adminBody').innerHTML = `
+    <div class="card">
+      <div class="card-title">${ar?'مراحل سير الإنتاج':'Production Workflow Stages'}</div>
+      <p style="font-size:11.5px;color:var(--text-3);margin-bottom:14px">${ar?'يمكنك تعديل أسماء المراحل لتطابق مصطلحات Veridos. التسلسل والقسم المسؤول ثابتان.':'You can rename stages to match Veridos terminology. Order and responsible department are fixed.'}</p>
+      <div style="overflow-x:auto"><table class="data">
+        <thead><tr><th>#</th><th>${ar?'المعرّف':'ID'}</th><th>${ar?'الكود':'Code'}</th><th>${ar?'الاسم العربي':'Name AR'}</th><th>${ar?'الاسم الإنجليزي':'Name EN'}</th><th>${ar?'القسم المسؤول':'Owner Dept'}</th><th></th></tr></thead>
+        <tbody>${STAGES.filter(s=>s.id!=='REJECTED').map((s,i)=>{
+          const eff = stageById(s.id);
+          const d = Q.dept(s.dept);
+          return `<tr><td class="mono">${i+1}</td>
+            <td class="mono">${s.id}</td>
+            <td><span class="tag">${s.code}</span></td>
+            <td>${escapeHTML(eff.name)}</td>
+            <td>${escapeHTML(eff.nameEn)}</td>
+            <td><span class="dept-tag" style="--dept-color:${d.color};--dept-bg:${d.bg}">${escapeHTML(ar?d.name:d.nameEn)}</span></td>
+            <td><button class="btn btn-sm btn-secondary" onclick="Action.editStage('${s.id}')">${ar?'تعديل':'Edit'}</button></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+    </div>
+  `;
+};
+
+View.adminBackup = function() {
+  const ar = State.lang === 'ar';
+  const size = JSON.stringify(State.data).length;
+  const sizeKB = (size / 1024).toFixed(1);
+  document.getElementById('adminBody').innerHTML = `
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title">⤓ ${ar?'تصدير البيانات':'Export Data'}</div>
+        <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">${ar?'تنزيل ملف JSON كامل بكل البيانات الحالية. استخدمه كنسخة احتياطية أو لنقل البيانات لجهاز آخر.':'Download full JSON snapshot of all current data. Use as backup or to transfer to another device.'}</p>
+        <div style="font-size:11px;color:var(--text-3);margin-bottom:12px">
+          ${ar?'الحجم الحالي:':'Current size:'} <span class="mono" style="color:var(--text)">${sizeKB} KB</span><br>
+          ${ar?'يحتوي على:':'Contains:'}
+          <span class="mono">${State.data.workOrders.length} WO</span> ·
+          <span class="mono">${State.data.users.length} ${ar?'مستخدم':'users'}</span> ·
+          <span class="mono">${State.data.audit.length} ${ar?'سجل تدقيق':'audit'}</span>
+        </div>
+        <button class="btn btn-primary w-full" onclick="Action.exportData()" style="justify-content:center">${ar?'تنزيل النسخة الاحتياطية':'Download Backup'}</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">⤒ ${ar?'استيراد البيانات':'Import Data'}</div>
+        <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">${ar?'⚠️ سيتم استبدال كل البيانات الحالية بمحتوى الملف. لا يمكن التراجع عن هذا الإجراء.':'⚠️ All current data will be replaced. This cannot be undone.'}</p>
+        <input type="file" id="importFile" accept=".json" style="display:none" onchange="Action.importData(this.files[0])">
+        <button class="btn btn-secondary w-full" onclick="document.getElementById('importFile').click()" style="justify-content:center">${ar?'اختيار ملف JSON':'Select JSON File'}</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="color:var(--rose)">⟲ ${ar?'إعادة تعيين':'Reset to Defaults'}</div>
+        <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">${ar?'حذف كل التعديلات والعودة إلى البيانات التجريبية الأصلية. يخرجك من النظام.':'Erase all changes and revert to original demo data. Will log you out.'}</p>
+        <button class="btn btn-danger w-full" onclick="App.confirmReset()" style="justify-content:center">${ar?'إعادة التعيين':'Reset Now'}</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">ℹ ${ar?'معلومات النظام':'System Info'}</div>
+        <div style="font-size:12px;line-height:1.9">
+          <div><span class="text-mute">${ar?'الإصدار:':'Version:'}</span> <span class="mono">${State.data.meta.version || '1.0'}</span></div>
+          <div><span class="text-mute">${ar?'التهيئة:':'Initialized:'}</span> <span class="mono">${fmt.date(State.data.meta.initialized)}</span></div>
+          <div><span class="text-mute">${ar?'مكان التخزين:':'Storage:'}</span> <span class="mono">localStorage (${STORAGE_KEY})</span></div>
+          <div><span class="text-mute">${ar?'المستخدم الحالي:':'Current user:'}</span> <span class="mono">${State.user.id}</span></div>
+        </div>
+      </div>
+    </div>
+  `;
+};
+
+/* ============ ACTIONS (modals + WO state transitions) ============ */
+const Action = {
+  // Open a WO detail
+  openWO(woId) {
+    const wo = Q.wo(woId);
+    if (!wo) return;
+    const ar = State.lang === 'ar';
+    const st = stageById(wo.currentStage);
+    const owner = wo.currentOwner ? Q.user(wo.currentOwner) : null;
+    const action = View.actionForStage(wo.currentStage, wo);
+    const canAct = Perm.canActOnWO(wo);
+
+    const body = `
+      <div class="grid-2" style="margin-bottom:14px">
+        <div><div class="text-mute" style="font-size:10.5px">${ar?'الكمية':'Qty'}</div><div class="mono" style="font-size:18px;font-weight:700">${fmt.num(wo.qty)}</div></div>
+        <div><div class="text-mute" style="font-size:10.5px">${ar?'منتج':'Produced'}</div><div class="mono" style="font-size:18px;font-weight:700;color:var(--emerald)">${fmt.num(wo.produced)}</div></div>
+        <div><div class="text-mute" style="font-size:10.5px">Scrap</div><div class="mono" style="font-size:18px;font-weight:700;color:var(--rose)">${fmt.num(wo.scrap)}</div></div>
+        <div><div class="text-mute" style="font-size:10.5px">${ar?'المرحلة':'Stage'}</div><div><span class="badge-status b-progress">${escapeHTML(ar?st.name:st.nameEn)}</span></div></div>
+      </div>
+      <div style="background:var(--glass);border:1px solid var(--border);border-radius:9px;padding:11px;margin-bottom:14px">
+        <div class="text-mute" style="font-size:10.5px;margin-bottom:4px">${ar?'المسؤول الحالي':'Current Owner'}</div>
+        ${owner?`<div style="display:flex;align-items:center;gap:9px"><div class="user-avatar" style="width:28px;height:28px;font-size:12px;background:${owner.color}">${owner.avatar}</div><div><div style="font-weight:600;font-size:13px">${escapeHTML(ar?owner.name:owner.nameEn)}</div><div class="text-mute" style="font-size:11px">${escapeHTML(ar?owner.role:owner.roleEn)} · ${escapeHTML(ar?Q.dept(owner.dept).name:Q.dept(owner.dept).nameEn)}</div></div></div>`:'<div class="text-mute">—</div>'}
+      </div>
+      <div class="card-title" style="margin-bottom:8px">${ar?'سجل الحركات':'Movement History'}</div>
+      <div style="max-height:240px;overflow-y:auto">
+        ${wo.history.slice().reverse().map(h => {
+          const stg = stageById(h.stage);
+          const fU = h.fromUser ? Q.user(h.fromUser) : null;
+          const tU = h.toUser ? Q.user(h.toUser) : null;
+          return `<div style="padding:8px 0;border-bottom:1px dashed var(--border);font-size:11.5px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div><b>${escapeHTML(stg?(ar?stg.name:stg.nameEn):h.stage)}</b> <span class="tag">${h.action}</span></div>
+              <div class="text-mute mono" style="font-size:10.5px">${fmt.ago(h.ts)}</div>
+            </div>
+            <div class="text-mute" style="margin-top:3px">
+              ${fU?escapeHTML(ar?fU.name:fU.nameEn):'—'} ${tU?'→ '+escapeHTML(ar?tU.name:tU.nameEn):''}
+              ${h.qty?` · <span class="mono">${fmt.num(h.qty)}</span>`:''}
+              ${h.scrap?` · <span class="mono text-rose">scrap ${h.scrap}</span>`:''}
+            </div>
+            ${h.notes?`<div class="text-mute" style="font-style:italic;font-size:11px;margin-top:2px">"${escapeHTML(h.notes)}"</div>`:''}
+          </div>`;
+        }).join('')}
+      </div>
+    `;
+
+    const footer = `
+      <button class="btn btn-secondary" onclick="App.closeModal()">${t('close')}</button>
+      <button class="btn btn-secondary" onclick="App.closeModal();App.goto('trace');setTimeout(()=>{document.getElementById('traceQuery').value='${woId}';View.runTrace()},50)">${ar?'فتح في التتبع':'Open in Trace'}</button>
+      ${action && canAct ? `<button class="btn btn-primary" onclick="App.closeModal();${action.handler}">${escapeHTML(action.label)}</button>` : (action?`<span class="text-mute" style="font-size:11px;align-self:center">${t('no_perm')}</span>`:'')}
+    `;
+    App.openModal(woId, body, footer, true);
+  },
+
+  // ─────── CREATE WO ───────
+  createWO() {
+    if (!Perm.canAct('PROD')) { toast(t('no_perm'), 'error'); return; }
+    const ar = State.lang === 'ar';
+    const body = `
+      <div class="form-grid">
+        <div class="field"><label>${ar?'وصف الدفعة':'Batch Description'} <span class="req">*</span></label><input id="newWODesc" placeholder="${ar?'مثال: بطاقة وطنية - دفعة 044':'e.g. National ID - Batch 044'}"></div>
+        <div class="form-row">
+          <div class="field"><label>${ar?'الكمية':'Quantity'} <span class="req">*</span></label><input id="newWOQty" type="number" min="1" value="5000"></div>
+          <div class="field"><label>${ar?'الأولوية':'Priority'}</label><select id="newWOPriority"><option value="low">low</option><option value="medium" selected>medium</option><option value="high">high</option></select></div>
+        </div>
+        <div class="field"><label>SKU</label><input id="newWOSku" value="CARD-NID-${String(State.data.workOrders.length+44).padStart(3,'0')}"></div>
+      </div>
+    `;
+    App.openModal(t('create_wo'), body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.submitNewWO()">${t('confirm')}</button>`);
+  },
+
+  submitNewWO() {
+    const desc = document.getElementById('newWODesc').value.trim();
+    const qty = parseInt(document.getElementById('newWOQty').value) || 0;
+    const priority = document.getElementById('newWOPriority').value;
+    const sku = document.getElementById('newWOSku').value.trim();
+    if (!desc || !qty) { toast(State.lang==='ar'?'املأ الحقول المطلوبة':'Fill required fields', 'error'); return; }
+    const id = 'WO-' + new Date().getFullYear() + '-' + String(State.data.workOrders.length + 44).padStart(4,'0');
+    const wo = {
+      id, sku, desc, qty, priority, currentStage: 'CREATED',
+      currentOwner: State.user.id, createdBy: State.user.id, createdAt: now(),
+      produced: 0, scrap: 0,
+      history: [{ stage: 'CREATED', action: 'create', fromUser: null, toUser: State.user.id, qty, scrap: 0, ts: now(), notes: 'WO أنشئ بواسطة '+State.user.name }],
+    };
+    State.data.workOrders.unshift(wo);
+    Audit.log('create_wo', 'WorkOrder', id, { qty, priority });
+    Movements.add('info', `${id} ${State.lang==='ar'?'تم إنشاؤه':'created'} (${fmt.num(qty)} ${State.lang==='ar'?'قطعة':'pcs'})`, { woId: id });
+    State.save();
+    App.closeModal();
+    toast(State.lang==='ar'?'تم إنشاء WO':'WO created', 'success');
+    App.goto('workorders');
+  },
+
+  // ─────── REQUEST MATERIALS (PROD → RAW) ───────
+  requestMaterials(woId) {
+    const wo = Q.wo(woId);
+    const ar = State.lang === 'ar';
+    if (wo.currentStage !== 'CREATED') return;
+    if (!Perm.canActOnWO(wo)) { toast(t('no_perm'), 'error'); return; }
+    const body = `
+      <p style="margin-bottom:14px;font-size:12.5px;color:var(--text-2)">${ar?'سيتم إرسال طلب صرف مواد إلى مستودع المواد الخام':'Material request will be sent to the Raw Materials warehouse'}</p>
+      <div class="field"><label>${ar?'ملاحظات':'Notes'}</label><textarea id="reqNotes" placeholder="${ar?'اختياري':'optional'}"></textarea></div>
+    `;
+    App.openModal(`${ar?'طلب مواد':'Request Materials'} — ${woId}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.submitRequestMaterials('${woId}')">${ar?'إرسال الطلب':'Send Request'}</button>`);
+  },
+  submitRequestMaterials(woId) {
+    const notes = document.getElementById('reqNotes').value.trim();
+    if (WF.advance(woId, { action: 'request', notes: notes || (State.lang==='ar'?'طلب مواد للإنتاج':'Material request') })) {
+      App.closeModal(); toast(State.lang==='ar'?'تم إرسال الطلب لمستودع الخام':'Sent to Raw WH', 'success');
+      App.goto(State.route);
+    }
+  },
+
+  // ─────── ISSUE MATERIALS (RAW → PROD) ───────
+  issueMaterials(woId) {
+    const wo = Q.wo(woId);
+    const ar = State.lang === 'ar';
+    if (!Perm.canActOnWO(wo)) { toast(t('no_perm'), 'error'); return; }
+    const body = `
+      <p style="margin-bottom:14px;font-size:12.5px;color:var(--text-2)">${ar?'تأكيد صرف المواد للإنتاج. الكمية ستُحجز من مستودع الخام.':'Confirm material issuance to production. Quantity will be deducted from Raw WH.'}</p>
+      <div class="form-row">
+        <div class="field"><label>${ar?'الكمية المصروفة':'Issued Qty'}</label><input id="issQty" type="number" value="${wo.qty}"></div>
+        <div class="field"><label>${ar?'إلى محطة':'To Station'}</label><select id="issStation"><option value="K1">K1</option></select></div>
+      </div>
+      <div class="field"><label>${ar?'ملاحظات':'Notes'}</label><textarea id="issNotes"></textarea></div>
+    `;
+    App.openModal(`${ar?'صرف مواد':'Issue Materials'} — ${woId}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.submitIssueMaterials('${woId}')">${t('confirm')}</button>`);
+  },
+  submitIssueMaterials(woId) {
+    const qty = parseInt(document.getElementById('issQty').value) || 0;
+    const notes = document.getElementById('issNotes').value.trim();
+    if (WF.advance(woId, { action: 'issue', qty, notes: notes || (State.lang==='ar'?'صرف مواد للإنتاج':'Materials issued') })) {
+      App.closeModal(); toast(State.lang==='ar'?'تم صرف المواد':'Materials issued', 'success');
+      App.goto(State.route);
+    }
+  },
+
+  // ─────── START STATION (K1 first start) ───────
+  startStation(woId, station) {
+    const wo = Q.wo(woId);
+    if (WF.advance(woId, { action: 'start', notes: (State.lang==='ar'?'بدء ':'Started ') + station })) {
+      const s = Q.station(station);
+      if (s) { s.status='running'; s.currentWO=woId; s.target=wo.qty; s.produced=0; s.scrap=0; s.startedAt=now(); }
+      State.save();
+      toast(State.lang==='ar'?`بدأ التشغيل على ${station}`:`Started on ${station}`, 'success');
+      App.goto(State.route);
+    }
+  },
+
+  // ─────── HANDOVER (station to station) ───────
+  handover(woId, targetStage, action='handover') {
+    const wo = Q.wo(woId);
+    const ar = State.lang === 'ar';
+    if (!Perm.canActOnWO(wo)) { toast(t('no_perm'), 'error'); return; }
+    const body = `
+      <p style="margin-bottom:14px;font-size:12.5px;color:var(--text-2)">${ar?'إكمال التسليم للمرحلة التالية':'Complete handover to the next stage'}: <b>${escapeHTML(stageById(targetStage)?.[ar?'name':'nameEn'])}</b></p>
+      <div class="form-row">
+        <div class="field"><label>${ar?'الكمية المسلَّمة':'Handover Qty'}</label><input id="hoQty" type="number" value="${wo.produced || wo.qty}"></div>
+        <div class="field"><label>${ar?'Scrap في هذه المرحلة':'Stage Scrap'}</label><input id="hoScrap" type="number" value="0"></div>
+      </div>
+      <div class="field"><label>${ar?'ملاحظات':'Notes'}</label><textarea id="hoNotes"></textarea></div>
+    `;
+    App.openModal(`${t('complete_handover')} — ${woId}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.submitHandover('${woId}','${action}')">${t('confirm')}</button>`);
+  },
+  submitHandover(woId, action) {
+    const qty = parseInt(document.getElementById('hoQty').value) || 0;
+    const scrap = parseInt(document.getElementById('hoScrap').value) || 0;
+    const notes = document.getElementById('hoNotes').value.trim();
+    if (WF.advance(woId, { action, qty, scrap, notes })) {
+      App.closeModal(); toast(State.lang==='ar'?'تم التسليم':'Handover complete', 'success');
+      App.goto(State.route);
+    }
+  },
+
+  // ─────── MOC CHECK (accept or reject) ───────
+  mocCheck(woId) {
+    const wo = Q.wo(woId);
+    const ar = State.lang === 'ar';
+    if (!Perm.canActOnWO(wo)) { toast(t('no_perm'), 'error'); return; }
+    const body = `
+      <p style="margin-bottom:14px;font-size:12.5px;color:var(--text-2)">${ar?'فحص نهاية الإنتاج للدفعة':'Final product control inspection for batch'} <b>${woId}</b></p>
+      <div class="form-row">
+        <div class="field"><label>${ar?'الكمية المقبولة':'Accepted Qty'}</label><input id="mocAccept" type="number" value="${wo.produced}"></div>
+        <div class="field"><label>${ar?'الكمية المرفوضة':'Rejected Qty'}</label><input id="mocReject" type="number" value="0"></div>
+      </div>
+      <div class="field"><label>${ar?'ملاحظات الفاحص':'Inspector Notes'}</label><textarea id="mocNotes" placeholder="${ar?'سبب القبول/الرفض، ملاحظات الجودة...':'Reason for accept/reject, quality notes...'}"></textarea></div>
+    `;
+    App.openModal(`MOC — ${woId}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-danger" onclick="Action.submitMOC('${woId}','reject')">${t('reject')}</button>
+       <button class="btn btn-success" onclick="Action.submitMOC('${woId}','accept')">${t('accept')}</button>`);
+  },
+  submitMOC(woId, decision) {
+    const accept = parseInt(document.getElementById('mocAccept').value) || 0;
+    const reject = parseInt(document.getElementById('mocReject').value) || 0;
+    const notes = document.getElementById('mocNotes').value.trim();
+    if (decision === 'accept') {
+      if (WF.acceptMOC(woId, accept, reject, notes)) {
+        App.closeModal(); toast(State.lang==='ar'?'تم قبول الدفعة':'Batch accepted', 'success');
+        App.goto(State.route);
+      }
+    } else {
+      if (WF.reject(woId, accept, reject, notes)) {
+        App.closeModal(); toast(State.lang==='ar'?'تم رفض الدفعة':'Batch rejected', 'warn');
+        App.goto(State.route);
+      }
+    }
+  },
+
+  // ─────── STATION DETAIL ───────
+  openStation(stationId) {
+    const s = Q.station(stationId);
+    const op = Q.user(s.operatorId);
+    const ar = State.lang === 'ar';
+    const wo = s.currentWO ? Q.wo(s.currentWO) : null;
+    const pct = s.target > 0 ? Math.min(100, (s.produced/s.target)*100) : 0;
+    const body = `
+      <div class="grid-2 mb-2">
+        <div><div class="text-mute" style="font-size:10.5px">${ar?'المشغّل المعيّن':'Operator'}</div>
+          ${op?`<div style="display:flex;align-items:center;gap:8px;margin-top:4px"><div class="user-avatar" style="width:28px;height:28px;font-size:12px;background:${op.color}">${op.avatar}</div><div><div style="font-weight:600;font-size:13px">${escapeHTML(ar?op.name:op.nameEn)}</div><div class="text-mute" style="font-size:11px">${escapeHTML(ar?op.role:op.roleEn)}</div></div></div>`:'—'}</div>
+        <div><div class="text-mute" style="font-size:10.5px">${ar?'الحالة':'Status'}</div><div style="margin-top:4px"><span class="badge-status b-${s.status}">${s.status}</span></div></div>
+      </div>
+      <div class="grid-3 mb-2">
+        <div><div class="text-mute" style="font-size:10.5px">${ar?'منتج':'Produced'}</div><div class="mono" style="font-size:18px;font-weight:700">${fmt.num(s.produced)}</div></div>
+        <div><div class="text-mute" style="font-size:10.5px">${ar?'الهدف':'Target'}</div><div class="mono" style="font-size:18px;font-weight:700">${fmt.num(s.target)}</div></div>
+        <div><div class="text-mute" style="font-size:10.5px">Scrap</div><div class="mono" style="font-size:18px;font-weight:700;color:var(--rose)">${fmt.num(s.scrap)}</div></div>
+      </div>
+      ${s.target>0?`<div class="station-progress"><div class="station-progress-fill" style="width:${pct}%"></div></div>
+      <div class="text-mute mono" style="font-size:11px;margin-top:6px">${pct.toFixed(1)}% — ${ar?'بدأ':'started'} ${fmt.ago(s.startedAt)}</div>`:''}
+      ${wo?`<div style="margin-top:14px;padding:11px;background:var(--glass-2);border:1px solid var(--border);border-radius:9px">
+        <div class="text-mute" style="font-size:10.5px">${ar?'WO الحالي':'Current WO'}</div>
+        <div class="mono" style="font-weight:700;font-size:14px;margin-top:2px">${wo.id}</div>
+        <div class="text-mute" style="font-size:11.5px">${escapeHTML(wo.desc)}</div>
+      </div>`:''}
+    `;
+    App.openModal(`${s.code} — ${escapeHTML(ar?s.name:s.nameEn)}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('close')}</button>
+       ${(s.status!=='maintenance' && Perm.canAct('PROD'))?`<button class="btn btn-danger" onclick="Action.requestMaint('${s.id}')">${t('request_maint')}</button>`:''}`);
+  },
+
+  // ─────── REQUEST MAINTENANCE ───────
+  requestMaint(stationId) {
+    const ar = State.lang === 'ar';
+    App.closeModal();
+    const stationOpts = State.data.stations.map(s=>`<option value="${s.id}" ${s.id===stationId?'selected':''}>${s.code} — ${escapeHTML(ar?s.name:s.nameEn)}</option>`).join('');
+    const body = `
+      <div class="form-grid">
+        <div class="field"><label>${ar?'المحطة':'Station'} <span class="req">*</span></label><select id="mrStation">${stationOpts}</select></div>
+        <div class="form-row">
+          <div class="field"><label>${ar?'العنوان':'Title'} <span class="req">*</span></label><input id="mrTitle" placeholder="${ar?'مثال: عطل في وحدة التشخيص':'e.g. Sensor fault'}"></div>
+          <div class="field"><label>${ar?'الأولوية':'Priority'}</label><select id="mrPriority"><option value="low">low</option><option value="medium" selected>medium</option><option value="high">high</option></select></div>
+        </div>
+        <div class="field"><label>${ar?'الوصف':'Description'}</label><textarea id="mrDesc"></textarea></div>
+      </div>
+    `;
+    App.openModal(t('request_maint'), body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.submitMaint()">${t('confirm')}</button>`);
+  },
+  submitMaint() {
+    const stationId = document.getElementById('mrStation').value;
+    const title = document.getElementById('mrTitle').value.trim();
+    const priority = document.getElementById('mrPriority').value;
+    const desc = document.getElementById('mrDesc').value.trim();
+    if (!title) { toast(State.lang==='ar'?'العنوان مطلوب':'Title required', 'error'); return; }
+    const tech = Q.usersOf('MAINT')[0];
+    const id = 'MR-' + String(State.data.maintenance.length+1).padStart(3,'0');
+    State.data.maintenance.unshift({
+      id, stationId, requestedBy: State.user.id, assignedTo: tech?.id || null,
+      status: 'in_progress', priority, title, desc, requestedAt: now(),
+    });
+    // Optionally mark station as maintenance if high priority
+    if (priority === 'high') {
+      const s = Q.station(stationId);
+      if (s && s.status !== 'running') s.status = 'maintenance';
+    }
+    Audit.log('request_maint', 'Maintenance', id, { stationId, priority });
+    Movements.add('warn', `${State.lang==='ar'?'طلب صيانة جديد':'New maintenance request'} — ${stationId}: ${title}`, { mrId: id });
+    State.save();
+    App.closeModal(); toast(State.lang==='ar'?'تم تسجيل الطلب':'Request logged', 'success');
+    App.goto('maintenance');
+  },
+  completeMaint(id) {
+    if (!Perm.canAct('MAINT')) { toast(t('no_perm'), 'error'); return; }
+    const m = State.data.maintenance.find(x=>x.id===id);
+    if (!m) return;
+    m.status = 'completed'; m.completedAt = now(); m.completedBy = State.user.id;
+    const s = Q.station(m.stationId);
+    if (s && s.status === 'maintenance') s.status = 'idle';
+    Audit.log('complete_maint', 'Maintenance', id, {});
+    Movements.add('ok', `${State.lang==='ar'?'تم إنجاز صيانة':'Maintenance completed'} ${m.stationId}`, { mrId: id });
+    State.save();
+    toast(State.lang==='ar'?'تم الإنجاز':'Completed', 'success');
+    App.goto('maintenance');
+  },
+
+  // ─────── ADMIN — USER CRUD ───────
+  editUser(id) {
+    if (!Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
+    const ar = State.lang === 'ar';
+    const u = id ? Q.user(id) : null;
+    const isNew = !u;
+    const colors = ['#f5b942','#14b8a6','#38bdf8','#0ea5e9','#a78bfa','#22c55e','#10b981','#8b5cf6','#f43f5e','#f59e0b','#ec4899'];
+    const deptOpts = Object.values(State.data.departments).map(d=>`<option value="${d.id}" ${u&&u.dept===d.id?'selected':''}>${escapeHTML(ar?d.name:d.nameEn)}</option>`).join('');
+    const colorOpts = colors.map(c=>`<option value="${c}" ${u&&u.color===c?'selected':''} style="background:${c}">${c}</option>`).join('');
+    const body = `
+      <div class="form-grid">
+        <div class="form-row">
+          <div class="field"><label>${ar?'المعرّف ID':'User ID'} <span class="req">*</span></label><input id="usrId" value="${u?u.id:('U-'+String(State.data.users.length*10+100).padStart(3,'0'))}" ${u?'readonly':''} class="mono"></div>
+          <div class="field"><label>${ar?'الحرف الأول':'Avatar Letter'}</label><input id="usrAvatar" maxlength="2" value="${u?u.avatar:''}" placeholder="${ar?'أ':'A'}"></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label>${ar?'الاسم بالعربي':'Name (AR)'} <span class="req">*</span></label><input id="usrName" value="${u?escapeHTML(u.name):''}"></div>
+          <div class="field"><label>${ar?'الاسم بالإنجليزي':'Name (EN)'} <span class="req">*</span></label><input id="usrNameEn" value="${u?escapeHTML(u.nameEn):''}"></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label>${ar?'القسم':'Department'} <span class="req">*</span></label><select id="usrDept">${deptOpts}</select></div>
+          <div class="field"><label>${ar?'اللون':'Color'}</label><select id="usrColor">${colorOpts}</select></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label>${ar?'الدور بالعربي':'Role (AR)'}</label><input id="usrRole" value="${u?escapeHTML(u.role):''}"></div>
+          <div class="field"><label>${ar?'الدور بالإنجليزي':'Role (EN)'}</label><input id="usrRoleEn" value="${u?escapeHTML(u.roleEn):''}"></div>
+        </div>
+      </div>
+    `;
+    App.openModal(isNew ? (ar?'مستخدم جديد':'New User') : (ar?'تعديل المستخدم':'Edit User'), body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.saveUser('${id||''}')">${t('save')}</button>`);
+  },
+  saveUser(existingId) {
+    if (!Perm.isManager()) return;
+    const ar = State.lang === 'ar';
+    const get = (id) => document.getElementById(id).value.trim();
+    const id = get('usrId'), name = get('usrName'), nameEn = get('usrNameEn');
+    if (!id || !name || !nameEn) { toast(ar?'املأ الحقول المطلوبة':'Fill required fields','error'); return; }
+    const data = { id, name, nameEn,
+      avatar: get('usrAvatar') || name.charAt(0),
+      dept: get('usrDept'), color: get('usrColor') || '#888',
+      role: get('usrRole') || '—', roleEn: get('usrRoleEn') || '—' };
+    if (existingId) {
+      const u = Q.user(existingId);
+      if (!u) return;
+      Object.assign(u, data);
+      Audit.log('edit_user', 'User', id, { changes: Object.keys(data) });
+      Movements.add('info', `${ar?'تم تعديل المستخدم':'User edited'} ${name}`, { userId: id });
+    } else {
+      if (State.data.users.find(x => x.id === id)) { toast(ar?'المعرّف موجود مسبقاً':'ID already exists','error'); return; }
+      State.data.users.push(data);
+      Audit.log('create_user', 'User', id, { name, dept: data.dept });
+      Movements.add('info', `${ar?'مستخدم جديد:':'New user:'} ${name}`, { userId: id });
+    }
+    State.save();
+    App.closeModal();
+    toast(ar?'تم الحفظ':'Saved','success');
+    View.adminUsers();
+  },
+  deleteUser(id) {
+    if (!Perm.isManager()) return;
+    const u = Q.user(id);
+    if (!u) return;
+    const ar = State.lang === 'ar';
+    if (id === State.user.id) { toast(ar?'لا يمكنك حذف نفسك':"Can't delete yourself",'error'); return; }
+    // Check dependencies
+    const blockingWO = State.data.workOrders.find(w => w.currentOwner === id && w.currentStage !== 'DELIVERED' && w.currentStage !== 'REJECTED');
+    if (blockingWO) { toast(ar?`المستخدم مسؤول عن ${blockingWO.id}`:`User owns ${blockingWO.id}`,'error'); return; }
+    const blockingStation = State.data.stations.find(s => s.operatorId === id);
+    if (blockingStation) { toast(ar?`المستخدم مشغّل لـ ${blockingStation.code}`:`User operates ${blockingStation.code}`,'error'); return; }
+    App.openModal(ar?'تأكيد الحذف':'Confirm Delete',
+      `<p>${ar?'هل أنت متأكد من حذف المستخدم':'Are you sure you want to delete'} <b>${escapeHTML(u.name)}</b>؟</p><p style="font-size:11px;color:var(--text-3);margin-top:8px">${ar?'لا يمكن التراجع عن هذا الإجراء':'This cannot be undone'}</p>`,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-danger" onclick="Action.confirmDeleteUser('${id}')">${ar?'حذف':'Delete'}</button>`);
+  },
+  confirmDeleteUser(id) {
+    const u = Q.user(id);
+    State.data.users = State.data.users.filter(x => x.id !== id);
+    Audit.log('delete_user', 'User', id, { name: u.name });
+    Movements.add('warn', `${State.lang==='ar'?'تم حذف المستخدم':'User deleted'} ${u.name}`, { userId: id });
+    State.save();
+    App.closeModal();
+    toast(State.lang==='ar'?'تم الحذف':'Deleted','success');
+    View.adminUsers();
+  },
+
+  // ─────── ADMIN — DEPT EDIT (name/color only) ───────
+  editDept(id) {
+    if (!Perm.isManager()) return;
+    const ar = State.lang === 'ar';
+    const d = Q.dept(id);
+    const colors = ['#f5b942','#14b8a6','#38bdf8','#0ea5e9','#a78bfa','#22c55e','#10b981','#8b5cf6','#f43f5e','#f59e0b','#ec4899','#06b6d4'];
+    const colorOpts = colors.map(c=>`<option value="${c}" ${d.color===c?'selected':''}>${c}</option>`).join('');
+    const body = `
+      <div class="form-grid">
+        <div class="field"><label>${ar?'المعرّف':'ID'}</label><input value="${d.id}" readonly class="mono"></div>
+        <div class="form-row">
+          <div class="field"><label>${ar?'الاسم بالعربي':'Name (AR)'}</label><input id="dpName" value="${escapeHTML(d.name)}"></div>
+          <div class="field"><label>${ar?'الاسم بالإنجليزي':'Name (EN)'}</label><input id="dpNameEn" value="${escapeHTML(d.nameEn)}"></div>
+        </div>
+        <div class="field"><label>${ar?'اللون':'Color'}</label><select id="dpColor">${colorOpts}</select></div>
+      </div>
+    `;
+    App.openModal(ar?'تعديل القسم':'Edit Department', body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.saveDept('${id}')">${t('save')}</button>`);
+  },
+  saveDept(id) {
+    if (!Perm.isManager()) return;
+    const d = State.data.departments[id];
+    if (!d) return;
+    const get = (x) => document.getElementById(x).value.trim();
+    d.name = get('dpName') || d.name;
+    d.nameEn = get('dpNameEn') || d.nameEn;
+    const newColor = get('dpColor');
+    if (newColor) {
+      d.color = newColor;
+      // Compute matching translucent bg
+      const hex = newColor.replace('#','');
+      const r = parseInt(hex.slice(0,2),16), g = parseInt(hex.slice(2,4),16), b = parseInt(hex.slice(4,6),16);
+      d.bg = `rgba(${r},${g},${b},0.12)`;
+    }
+    Audit.log('edit_dept', 'Department', id, { name: d.name });
+    State.save();
+    App.closeModal();
+    toast(State.lang==='ar'?'تم الحفظ':'Saved','success');
+    View.adminDepts();
+  },
+
+  // ─────── ADMIN — STATION EDIT ───────
+  editStation(id) {
+    if (!Perm.isManager()) return;
+    const ar = State.lang === 'ar';
+    const s = Q.station(id);
+    if (!s) return;
+    const prodUsers = Q.usersOf('PROD').concat(Q.usersOf('QC'));
+    const opOpts = `<option value="">${ar?'— لا يوجد —':'— none —'}</option>` + prodUsers.map(u=>`<option value="${u.id}" ${u.id===s.operatorId?'selected':''}>${escapeHTML(ar?u.name:u.nameEn)} (${escapeHTML(ar?u.role:u.roleEn)})</option>`).join('');
+    const body = `
+      <div class="form-grid">
+        <div class="form-row">
+          <div class="field"><label>${ar?'الكود':'Code'}</label><input value="${s.code}" readonly class="mono"></div>
+          <div class="field"><label>${ar?'المعرّف':'ID'}</label><input value="${s.id}" readonly class="mono"></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label>${ar?'الاسم بالعربي':'Name (AR)'}</label><input id="stName" value="${escapeHTML(s.name)}"></div>
+          <div class="field"><label>${ar?'الاسم بالإنجليزي':'Name (EN)'}</label><input id="stNameEn" value="${escapeHTML(s.nameEn)}"></div>
+        </div>
+        <div class="field"><label>${ar?'المشغّل المعيّن':'Assigned Operator'}</label><select id="stOp">${opOpts}</select></div>
+      </div>
+    `;
+    App.openModal(`${ar?'تعديل المحطة':'Edit Station'} ${s.code}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.saveStation('${id}')">${t('save')}</button>`);
+  },
+  saveStation(id) {
+    if (!Perm.isManager()) return;
+    const s = Q.station(id);
+    if (!s) return;
+    const get = (x) => document.getElementById(x).value.trim();
+    s.name = get('stName') || s.name;
+    s.nameEn = get('stNameEn') || s.nameEn;
+    s.operatorId = get('stOp') || null;
+    Audit.log('edit_station', 'Station', id, { name: s.name, operator: s.operatorId });
+    State.save();
+    App.closeModal();
+    toast(State.lang==='ar'?'تم الحفظ':'Saved','success');
+    View.adminStations();
+  },
+
+  // ─────── ADMIN — STAGE NAME EDIT ───────
+  editStage(id) {
+    if (!Perm.isManager()) return;
+    const ar = State.lang === 'ar';
+    const s = stageById(id);
+    const body = `
+      <div class="form-grid">
+        <div class="field"><label>${ar?'المعرّف':'ID'}</label><input value="${id}" readonly class="mono"></div>
+        <div class="form-row">
+          <div class="field"><label>${ar?'الاسم بالعربي':'Name (AR)'}</label><input id="sgName" value="${escapeHTML(s.name)}"></div>
+          <div class="field"><label>${ar?'الاسم بالإنجليزي':'Name (EN)'}</label><input id="sgNameEn" value="${escapeHTML(s.nameEn)}"></div>
+        </div>
+        <p style="font-size:11px;color:var(--text-3)">${ar?'الاسم فقط قابل للتعديل. التسلسل والقسم المسؤول ثابتان لحماية سير العمل.':'Only the name is editable. Order and owner department are fixed to protect workflow integrity.'}</p>
+      </div>
+    `;
+    App.openModal(ar?'تعديل اسم المرحلة':'Edit Stage Name', body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       ${State.data.stageOverrides[id]?`<button class="btn btn-danger btn-sm" onclick="Action.resetStage('${id}')">${ar?'استعادة الأصلي':'Reset to default'}</button>`:''}
+       <button class="btn btn-primary" onclick="Action.saveStage('${id}')">${t('save')}</button>`);
+  },
+  saveStage(id) {
+    if (!Perm.isManager()) return;
+    const get = (x) => document.getElementById(x).value.trim();
+    const base = STAGES.find(s => s.id === id);
+    if (!base) return;
+    const name = get('sgName'), nameEn = get('sgNameEn');
+    if (name === base.name && nameEn === base.nameEn) {
+      delete State.data.stageOverrides[id];
+    } else {
+      State.data.stageOverrides[id] = { name, nameEn };
+    }
+    Audit.log('edit_stage', 'Stage', id, { name, nameEn });
+    State.save();
+    App.closeModal();
+    toast(State.lang==='ar'?'تم الحفظ':'Saved','success');
+    View.adminWorkflow();
+  },
+  resetStage(id) {
+    if (!Perm.isManager()) return;
+    delete State.data.stageOverrides[id];
+    Audit.log('reset_stage', 'Stage', id, {});
+    State.save();
+    App.closeModal();
+    toast(State.lang==='ar'?'تم الاستعادة':'Reset','success');
+    View.adminWorkflow();
+  },
+
+  // ─────── BACKUP ───────
+  exportData() {
+    const payload = {
+      _meta: { exportedAt: now(), exportedBy: State.user.id, version: '1.0', source: 'ProdLine OS' },
+      data: State.data,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+    a.href = url; a.download = `prodline-backup-${stamp}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    Audit.log('export_data', 'System', 'backup', { size: JSON.stringify(payload).length });
+    toast(State.lang==='ar'?'تم تنزيل النسخة الاحتياطية':'Backup downloaded','success');
+  },
+  importData(file) {
+    if (!file) return;
+    if (!Perm.isManager()) { toast(t('no_perm'),'error'); return; }
+    const ar = State.lang === 'ar';
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const parsed = JSON.parse(e.target.result);
+        const incoming = parsed.data || parsed; // accept both shapes
+        if (!incoming.users || !incoming.workOrders || !incoming.stations) {
+          toast(ar?'الملف غير صالح':'Invalid file','error'); return;
+        }
+        App.openModal(ar?'تأكيد الاستيراد':'Confirm Import',
+          `<p>${ar?'سيتم استبدال كل البيانات الحالية بمحتوى الملف:':'All current data will be replaced with file contents:'}</p>
+           <div class="mono" style="background:var(--glass-2);padding:10px;border-radius:8px;font-size:11.5px;margin-top:10px">
+            ${incoming.users.length} ${ar?'مستخدم':'users'} ·
+            ${incoming.workOrders.length} WO ·
+            ${incoming.audit?incoming.audit.length:0} ${ar?'سجل تدقيق':'audit'}<br>
+            ${parsed._meta?(ar?'تاريخ التصدير: ':'Exported: ')+fmt.date(parsed._meta.exportedAt):''}
+           </div>
+           <p style="font-size:11px;color:var(--rose);margin-top:10px">${ar?'⚠️ لا يمكن التراجع عن هذا الإجراء':'⚠️ This cannot be undone'}</p>`,
+          `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+           <button class="btn btn-danger" onclick="Action.confirmImport()">${ar?'استيراد':'Import'}</button>`);
+        Action._pendingImport = incoming;
+      } catch (err) {
+        toast(ar?'خطأ في قراءة الملف':'File read error','error');
+      }
+    };
+    reader.readAsText(file);
+  },
+  confirmImport() {
+    if (!Action._pendingImport) return;
+    const importedAuditId = uid('AUD');
+    State.data = Action._pendingImport;
+    State.migrate?.() || (function(){
+      // fallback migrate
+      if (!State.data.departments) State.data.departments = JSON.parse(JSON.stringify(DEPTS));
+      if (!State.data.stageOverrides) State.data.stageOverrides = {};
+    })();
+    if (!State.data.audit) State.data.audit = [];
+    State.data.audit.unshift({ id: importedAuditId, ts: now(), user: State.user.id, userName: State.user.name, action: 'import_data', entity: 'System', entityId: 'backup', details: {} });
+    State.save();
+    Action._pendingImport = null;
+    App.closeModal();
+    toast(State.lang==='ar'?'تم الاستيراد':'Imported','success');
+    // Re-login if current user not in imported data
+    if (!Q.user(State.user.id)) { App.logout(); }
+    else { App.renderSidebar(); App.goto('admin'); }
+  },
+};
+
+// Initialize
+App.init();
+</script>
+</body>
+</html>
