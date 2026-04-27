@@ -1528,7 +1528,7 @@ const App = {
       audit:       View.audit,
       admin:       View.admin,
     };
-    (fns[route] || View.dashboard)();
+    (fns[route] || View.dashboard).call(View);
     document.getElementById('content').scrollTop = 0;
   },
 
