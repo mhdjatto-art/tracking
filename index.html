@@ -610,6 +610,304 @@ body[dir="rtl"] .stage:not(:last-child)::after {
 .user-card-name { font-size: 13px; font-weight: 600; }
 .user-card-meta { font-size: 11px; color: var(--text-3); margin-top: 2px; display: flex; align-items: center; gap: 6px; }
 
+/* ============ DYNAMIC VISUALIZATIONS (Phase 1.4a-viz) ============ */
+
+/* Animated counter — pulses on change */
+.counter-pulse {
+  animation: counterPulse 0.6s ease;
+}
+@keyframes counterPulse {
+  0% { transform: scale(1); color: var(--text); }
+  40% { transform: scale(1.08); color: var(--gold); text-shadow: 0 0 20px rgba(245,185,66,0.5); }
+  100% { transform: scale(1); color: var(--text); }
+}
+
+/* WO tokens that ride the pipeline */
+.pipeline-track {
+  position: relative;
+  height: 130px;
+  margin: 8px -8px 12px -8px;
+  background: linear-gradient(180deg, transparent, rgba(255,255,255,0.02));
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.pipeline-track::before {
+  content: '';
+  position: absolute;
+  top: 65px; left: 24px; right: 24px;
+  height: 3px;
+  background: linear-gradient(90deg,
+    rgba(245,185,66,0.15) 0%,
+    rgba(245,185,66,0.4) 50%,
+    rgba(245,185,66,0.15) 100%);
+  background-size: 200% 100%;
+  animation: trackFlow 3s linear infinite;
+  border-radius: 2px;
+  z-index: 0;
+}
+@keyframes trackFlow {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.stage-marker {
+  position: absolute;
+  top: 50px; bottom: 50px;
+  width: 2px;
+  background: linear-gradient(180deg, transparent, var(--border-2), transparent);
+  z-index: 1;
+}
+.stage-marker-label {
+  position: absolute;
+  top: 0; left: 50%;
+  transform: translateX(-50%);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--text-3);
+  white-space: nowrap;
+  background: var(--bg-1);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.stage-marker.has-wo .stage-marker-label {
+  color: var(--gold);
+  background: rgba(245,185,66,0.1);
+  border: 1px solid rgba(245,185,66,0.3);
+}
+.wo-token {
+  position: absolute;
+  top: 56px;
+  width: 64px;
+  margin-left: -32px;
+  background: linear-gradient(135deg, var(--bg-2), var(--bg-3));
+  border: 1.5px solid var(--gold);
+  border-radius: 9px;
+  padding: 5px 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--gold);
+  text-align: center;
+  z-index: 2;
+  transition: left 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 14px rgba(245,185,66,0.25), 0 0 0 1px rgba(245,185,66,0.1);
+  cursor: pointer;
+}
+.wo-token::before {
+  content: '';
+  position: absolute;
+  top: -4px; left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-bottom-color: var(--gold);
+}
+.wo-token.priority-high {
+  border-color: var(--rose);
+  color: var(--rose);
+  box-shadow: 0 4px 14px rgba(244,63,94,0.3), 0 0 0 1px rgba(244,63,94,0.15);
+}
+.wo-token.priority-high::before { border-bottom-color: var(--rose); }
+.wo-token.just-moved { animation: tokenLand 0.9s ease; }
+@keyframes tokenLand {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.15); }
+  70% { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+.wo-token-id { font-size: 9px; line-height: 1.1; }
+.wo-token-qty { font-size: 8px; opacity: 0.8; margin-top: 1px; }
+
+.wo-token-empty {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--text-3);
+  font-style: italic;
+}
+
+/* Dashboard grid for charts */
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.chart-card {
+  background: var(--glass); backdrop-filter: blur(18px);
+  border: 1px solid var(--border); border-radius: var(--r);
+  padding: 14px; position: relative; overflow: hidden;
+}
+.chart-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px;
+}
+.chart-title {
+  font-size: 12px; font-weight: 600; color: var(--text-2);
+}
+.chart-meta {
+  font-size: 10.5px; color: var(--text-3);
+  font-family: 'JetBrains Mono', monospace;
+}
+.chart-svg { width: 100%; height: 130px; display: block; }
+
+/* Chart elements */
+.chart-bar {
+  fill: url(#goldGrad);
+  transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.chart-bar:hover { fill: var(--gold); }
+.chart-line {
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: d 0.6s ease;
+}
+.chart-area {
+  fill: url(#goldArea);
+  opacity: 0.6;
+  transition: d 0.6s ease;
+}
+.chart-axis {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.chart-grid-line {
+  stroke: var(--border);
+  stroke-dasharray: 2,3;
+  stroke-width: 1;
+  opacity: 0.4;
+}
+.chart-label {
+  fill: var(--text-3);
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.chart-value {
+  fill: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Donut */
+.donut-segment {
+  transition: stroke-dashoffset 0.8s ease, stroke-dasharray 0.8s ease;
+}
+.donut-center-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 22px;
+  font-weight: 700;
+  fill: var(--text);
+}
+.donut-center-label {
+  font-size: 10px;
+  fill: var(--text-3);
+  font-family: 'Cairo', sans-serif;
+}
+.donut-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 10.5px;
+  margin-top: 6px;
+}
+.donut-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: var(--glass-2);
+  border-radius: 5px;
+}
+.donut-legend-item::before {
+  content: '';
+  width: 7px; height: 7px;
+  border-radius: 2px;
+  background: var(--legend-color, var(--gold));
+}
+
+/* Gauge */
+.gauge-wrap {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.gauge-arc-bg { fill: none; stroke: rgba(255,255,255,0.05); stroke-width: 12; stroke-linecap: round; }
+.gauge-arc { fill: none; stroke: var(--gold); stroke-width: 12; stroke-linecap: round;
+  transition: stroke-dasharray 0.9s cubic-bezier(0.4,0,0.2,1); }
+.gauge-arc.good { stroke: var(--emerald); }
+.gauge-arc.warn { stroke: var(--amber); }
+.gauge-arc.bad { stroke: var(--rose); }
+.gauge-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 28px; font-weight: 700;
+  text-align: center;
+  margin-top: -38px;
+}
+.gauge-label { font-size: 11px; color: var(--text-3); text-align: center; margin-top: 4px; }
+
+/* Radial bars (station performance) */
+.radial-row {
+  display: grid;
+  grid-template-columns: 32px 1fr 60px;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 9px;
+}
+.radial-row:last-child { margin-bottom: 0; }
+.radial-code {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--gold);
+}
+.radial-track {
+  height: 8px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+.radial-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold), var(--gold-2));
+  border-radius: 4px;
+  transition: width 0.9s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+.radial-fill.full { background: linear-gradient(90deg, var(--emerald), var(--emerald-2)); }
+.radial-fill.warn { background: linear-gradient(90deg, var(--amber), #d97706); }
+.radial-fill.idle { background: rgba(255,255,255,0.1); }
+.radial-fill::after {
+  content: '';
+  position: absolute;
+  top: 0; right: 0;
+  width: 6px; height: 100%;
+  background: rgba(255,255,255,0.4);
+  filter: blur(3px);
+}
+.radial-stat {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  text-align: end;
+}
+
+/* Card shimmer on data refresh */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.refreshed {
+  animation: shimmerOnce 1s ease;
+}
+@keyframes shimmerOnce {
+  0%, 100% { box-shadow: 0 0 0 transparent; }
+  50% { box-shadow: 0 0 0 1px rgba(245,185,66,0.25); }
+}
+
 /* ============ MISC ============ */
 .text-mute { color: var(--text-3); }
 .text-2 { color: var(--text-2); }
@@ -1306,6 +1604,226 @@ const WF = {
   }
 };
 
+/* ============ DYNAMIC VISUALIZATION HELPERS (Phase 1.4a-viz) ============ */
+
+// Counter animation: smoothly tween a numeric DOM element from old to new value
+const Animate = {
+  counter(el, fromVal, toVal, opts = {}) {
+    if (!el || fromVal === toVal) return;
+    const duration = opts.duration || 700;
+    const formatter = opts.formatter || (v => fmt.num(v));
+    const start = performance.now();
+    const diff = toVal - fromVal;
+    const ease = (t) => 1 - Math.pow(1 - t, 3); // ease-out cubic
+    function step(now) {
+      const t = Math.min(1, (now - start) / duration);
+      const v = fromVal + diff * ease(t);
+      el.textContent = formatter(v);
+      if (t < 1) requestAnimationFrame(step);
+      else {
+        el.textContent = formatter(toVal);
+        el.classList.add('counter-pulse');
+        setTimeout(() => el.classList.remove('counter-pulse'), 700);
+      }
+    }
+    requestAnimationFrame(step);
+  },
+  pct(el, fromVal, toVal, opts = {}) {
+    this.counter(el, fromVal, toVal, { ...opts, formatter: v => v.toFixed(opts.decimals||1) + '%' });
+  }
+};
+
+// Track historical snapshots for time-series charts
+const History = {
+  push() {
+    if (!State.data.history) State.data.history = { hourly: [], daily: [] };
+    const wos = State.data.workOrders;
+    const now = Date.now();
+    const totalProduced = wos.reduce((s,w) => s + (w.produced||0), 0);
+    const totalScrap = wos.reduce((s,w) => s + (w.scrap||0), 0);
+    const snap = {
+      ts: now,
+      produced: totalProduced,
+      scrap: totalScrap,
+      activeWO: wos.filter(w => !['DELIVERED','REJECTED'].includes(w.currentStage)).length,
+      stationsRunning: State.data.stations.filter(s => s.status === 'running').length,
+    };
+    // Keep last 24 hourly snapshots (one per hour)
+    const lastHour = State.data.history.hourly.slice(-1)[0];
+    if (!lastHour || (now - lastHour.ts) > 3600000) {
+      State.data.history.hourly.push(snap);
+      if (State.data.history.hourly.length > 24) State.data.history.hourly.shift();
+    } else {
+      // Update last entry if within same hour
+      State.data.history.hourly[State.data.history.hourly.length - 1] = snap;
+    }
+  },
+  // Synthesize 24h of hourly data on first run so charts have something to show
+  seed() {
+    if (!State.data.history) State.data.history = { hourly: [], daily: [] };
+    if (State.data.history.hourly.length >= 6) return;
+    const now = Date.now();
+    const baseProduced = 11200;
+    for (let i = 23; i >= 0; i--) {
+      const ts = now - i * 3600000;
+      // Realistic production curve with night dip
+      const hour = new Date(ts).getHours();
+      const intensity = (hour >= 22 || hour < 6) ? 0.2 + Math.random()*0.1
+                      : (hour >= 8 && hour < 17) ? 0.85 + Math.random()*0.15
+                      : 0.5 + Math.random()*0.2;
+      State.data.history.hourly.push({
+        ts,
+        produced: Math.round(baseProduced + (24-i) * 180 * intensity + Math.random()*60),
+        scrap: Math.round(40 + i * 0.8 + Math.random()*8),
+        activeWO: 2 + Math.floor(Math.random() * 3),
+        stationsRunning: hour >= 8 && hour < 17 ? 4 : 2,
+      });
+    }
+  }
+};
+
+/* ============ CHART BUILDERS (vanilla SVG) ============ */
+const Chart = {
+
+  // Line chart with area fill — for throughput/scrap trend
+  line(data, opts = {}) {
+    if (!data || data.length === 0) return '<div class="empty-state" style="padding:30px">لا توجد بيانات</div>';
+    const w = opts.width || 400, h = opts.height || 130;
+    const pad = { top: 10, right: 10, bottom: 22, left: 32 };
+    const innerW = w - pad.left - pad.right;
+    const innerH = h - pad.top - pad.bottom;
+    const xs = data.map((_,i) => i);
+    const ys = data.map(d => d.value);
+    const minY = 0;
+    const maxY = Math.max(...ys, 1) * 1.1;
+    const xScale = (i) => pad.left + (i / Math.max(1, data.length-1)) * innerW;
+    const yScale = (v) => pad.top + innerH - ((v - minY) / (maxY - minY)) * innerH;
+
+    const points = data.map((d,i) => `${xScale(i)},${yScale(d.value)}`).join(' ');
+    const areaPath = `M ${xScale(0)},${yScale(0)} L ${data.map((d,i) => `${xScale(i)},${yScale(d.value)}`).join(' L ')} L ${xScale(data.length-1)},${yScale(0)} Z`;
+    const linePath = `M ${data.map((d,i) => `${xScale(i)},${yScale(d.value)}`).join(' L ')}`;
+
+    // Gridlines (3 horizontal)
+    const gridLines = [0.25, 0.5, 0.75].map(p => {
+      const y = pad.top + innerH * p;
+      return `<line class="chart-grid-line" x1="${pad.left}" x2="${pad.left+innerW}" y1="${y}" y2="${y}"/>`;
+    }).join('');
+
+    // Y axis labels
+    const yLabels = [0, 0.5, 1].map(p => {
+      const v = minY + (maxY - minY) * (1 - p);
+      const y = pad.top + innerH * p;
+      return `<text class="chart-label" x="${pad.left-5}" y="${y+3}" text-anchor="end">${fmt.num(v)}</text>`;
+    }).join('');
+
+    // X axis labels (first, mid, last)
+    const xLabelsIdx = [0, Math.floor(data.length/2), data.length-1];
+    const xLabels = xLabelsIdx.map(i => {
+      if (!data[i]) return '';
+      return `<text class="chart-label" x="${xScale(i)}" y="${h-5}" text-anchor="middle">${escapeHTML(data[i].label||'')}</text>`;
+    }).join('');
+
+    // Last value marker
+    const lastIdx = data.length-1;
+    const marker = `<circle cx="${xScale(lastIdx)}" cy="${yScale(data[lastIdx].value)}" r="4" fill="var(--gold)" stroke="var(--bg-1)" stroke-width="2"/>`;
+
+    return `<svg class="chart-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="goldArea" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--gold)" stop-opacity="0.4"/>
+          <stop offset="100%" stop-color="var(--gold)" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      ${gridLines}
+      ${yLabels}
+      <path class="chart-area" d="${areaPath}"/>
+      <path class="chart-line" d="${linePath}"/>
+      ${marker}
+      ${xLabels}
+    </svg>`;
+  },
+
+  // Donut chart for stage distribution
+  donut(segments, opts = {}) {
+    const total = segments.reduce((s,seg) => s + seg.value, 0);
+    if (total === 0) {
+      return `<svg class="chart-svg" viewBox="0 0 200 130">
+        <circle cx="100" cy="65" r="42" fill="none" stroke="var(--border)" stroke-width="12"/>
+        <text class="donut-center-value" x="100" y="68" text-anchor="middle">0</text>
+        <text class="donut-center-label" x="100" y="84" text-anchor="middle">${opts.centerLabel||'لا توجد'}</text>
+      </svg><div class="donut-legend"></div>`;
+    }
+    const cx = 100, cy = 65, r = 42, strokeW = 12;
+    const circumference = 2 * Math.PI * r;
+    let cumPct = 0;
+    const arcs = segments.map((seg, i) => {
+      const pct = seg.value / total;
+      const dasharray = `${pct * circumference} ${circumference}`;
+      const offset = -cumPct * circumference;
+      cumPct += pct;
+      return `<circle class="donut-segment" cx="${cx}" cy="${cy}" r="${r}" fill="none"
+        stroke="${seg.color||'var(--gold)'}" stroke-width="${strokeW}"
+        stroke-dasharray="${dasharray}" stroke-dashoffset="${offset}"
+        transform="rotate(-90 ${cx} ${cy})"/>`;
+    }).join('');
+
+    const centerVal = opts.centerValue != null ? opts.centerValue : total;
+    const legend = segments.filter(s => s.value > 0).map(s => `<span class="donut-legend-item" style="--legend-color:${s.color}">${escapeHTML(s.label)} <b style="color:var(--text)">${s.value}</b></span>`).join('');
+
+    return `<svg class="chart-svg" viewBox="0 0 200 130">
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="${strokeW}"/>
+      ${arcs}
+      <text class="donut-center-value" x="${cx}" y="${cy+5}" text-anchor="middle">${fmt.num(centerVal)}</text>
+      <text class="donut-center-label" x="${cx}" y="${cy+22}" text-anchor="middle">${escapeHTML(opts.centerLabel||'')}</text>
+    </svg>
+    <div class="donut-legend">${legend}</div>`;
+  },
+
+  // Gauge chart for OEE / health score
+  gauge(value, opts = {}) {
+    const max = opts.max || 100;
+    const v = Math.max(0, Math.min(max, value));
+    const pct = v / max;
+    const cx = 100, cy = 80, r = 50;
+    // Half circle from 180° to 360°
+    const arcLen = Math.PI * r; // semicircle circumference
+    const dashArray = `${arcLen * pct} ${arcLen}`;
+    const cls = pct >= 0.85 ? 'good' : pct >= 0.6 ? '' : pct >= 0.4 ? 'warn' : 'bad';
+    return `<svg class="chart-svg" viewBox="0 0 200 110" style="height:110px">
+      <path class="gauge-arc-bg" d="M ${cx-r},${cy} A ${r},${r} 0 0 1 ${cx+r},${cy}"/>
+      <path class="gauge-arc ${cls}" d="M ${cx-r},${cy} A ${r},${r} 0 0 1 ${cx+r},${cy}" stroke-dasharray="${dashArray}"/>
+      <text x="${cx}" y="${cy-8}" text-anchor="middle" style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;fill:var(--text)">${v.toFixed(0)}<tspan style="font-size:14px;fill:var(--text-3)">${opts.unit||'%'}</tspan></text>
+      <text x="${cx}" y="${cy+8}" text-anchor="middle" style="font-size:10px;fill:var(--text-3)">${escapeHTML(opts.label||'')}</text>
+    </svg>`;
+  },
+
+  // Radial bars for station performance comparison
+  radialBars(rows, opts = {}) {
+    return rows.map(row => {
+      const pct = Math.min(100, row.pct);
+      const cls = row.status === 'maintenance' ? 'warn' : row.status === 'idle' ? 'idle' : pct >= 95 ? 'full' : '';
+      return `<div class="radial-row">
+        <div class="radial-code">${escapeHTML(row.code)}</div>
+        <div class="radial-track"><div class="radial-fill ${cls}" style="width:${pct}%"></div></div>
+        <div class="radial-stat">${row.stat}</div>
+      </div>`;
+    }).join('');
+  },
+
+  // Sparkline (mini line chart for KPI cards)
+  sparkline(values, opts = {}) {
+    if (!values || values.length === 0) return '';
+    const w = 80, h = 24;
+    const min = Math.min(...values), max = Math.max(...values);
+    const range = max - min || 1;
+    const xs = (i) => (i / (values.length-1)) * w;
+    const ys = (v) => h - ((v - min) / range) * h;
+    const path = values.map((v,i) => `${xs(i)},${ys(v)}`).join(' ');
+    const color = opts.color || 'var(--gold)';
+    return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline points="${path}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
+};
+
 /* ============ APP / ROUTER ============ */
 const App = {
   async init() {
@@ -1579,16 +2097,10 @@ const View = {
 
   // ─────── LIVE DASHBOARD ───────
   dashboard() {
-    const wos = State.data.workOrders;
-    const active = wos.filter(w => w.currentStage !== 'DELIVERED' && w.currentStage !== 'REJECTED');
-    const delivered = wos.filter(w => w.currentStage === 'DELIVERED');
-    const totalProduced = wos.reduce((s,w) => s + (w.produced||0), 0);
-    const totalScrap = wos.reduce((s,w) => s + (w.scrap||0), 0);
-    const scrapRate = totalProduced > 0 ? (totalScrap / (totalProduced + totalScrap)) * 100 : 0;
-    const inMOC = wos.filter(w => w.currentStage === 'AT_MOC').length;
-    const stationsRunning = State.data.stations.filter(s => s.status === 'running').length;
+    History.seed(); // ensure we have time-series data
 
     const ar = State.lang === 'ar';
+    const m = this._metrics();
 
     document.getElementById('content').innerHTML = `
       <div class="page-header">
@@ -1601,9 +2113,51 @@ const View = {
         </div>
       </div>
 
-      <div class="kpi-grid" id="kpiGrid">${this.kpiHTML(active.length, totalProduced, scrapRate, inMOC, stationsRunning, delivered.length)}</div>
+      <div class="kpi-grid" id="kpiGrid">${this.kpiHTML(m)}</div>
 
       <div class="pipeline" id="pipeline">${this.pipelineHTML()}</div>
+
+      <div class="charts-grid">
+        <div class="chart-card">
+          <div class="chart-head">
+            <span class="chart-title">${ar?'الإنتاج عبر آخر 24 ساعة':'Production — Last 24h'}</span>
+            <span class="chart-meta" id="throughputMeta">+${fmt.num(m.last1h)} ${ar?'/ساعة':'/h'}</span>
+          </div>
+          <div id="chartThroughput">${this.chartThroughputHTML()}</div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-head">
+            <span class="chart-title">${ar?'أداء المحطات':'Station Performance'}</span>
+            <span class="chart-meta">${m.stationsRunning}/5 ${ar?'شغّالة':'running'}</span>
+          </div>
+          <div id="chartStations">${this.chartStationsHTML()}</div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-head">
+            <span class="chart-title">${ar?'توزيع WOs على المراحل':'WO Distribution by Stage'}</span>
+            <span class="chart-meta">${m.active.length} ${ar?'WO نشط':'active'}</span>
+          </div>
+          <div id="chartDist">${this.chartDistHTML()}</div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-head">
+            <span class="chart-title">${ar?'اتجاه نسبة Scrap':'Scrap Rate Trend'}</span>
+            <span class="chart-meta" id="scrapMeta" style="color:${m.scrapRate>2?'var(--rose)':'var(--emerald)'}">${m.scrapRate.toFixed(2)}%</span>
+          </div>
+          <div id="chartScrap">${this.chartScrapHTML()}</div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-head">
+            <span class="chart-title">OEE — ${ar?'الفعالية الإجمالية':'Overall Equipment Effectiveness'}</span>
+            <span class="chart-meta">${ar?'مباشر':'live'}</span>
+          </div>
+          <div id="chartOEE">${this.chartOEEHTML(m)}</div>
+        </div>
+      </div>
 
       <div class="grid-2-1">
         <div class="card">
@@ -1621,54 +2175,176 @@ const View = {
 
       <div class="card mt-2">
         <div class="card-title">${ar?'أوامر الشغل النشطة':'Active Work Orders'}</div>
-        ${this.activeWOTable(active)}
+        ${this.activeWOTable(m.active)}
       </div>
     `;
+    // Cache last metrics for smart diffing in refresh
+    this._lastMetrics = m;
   },
 
-  kpiHTML(activeCount, produced, scrapRate, inMOC, running, delivered) {
+  // Compute all dashboard metrics in one shot
+  _metrics() {
+    const wos = State.data.workOrders;
+    const active = wos.filter(w => w.currentStage !== 'DELIVERED' && w.currentStage !== 'REJECTED');
+    const delivered = wos.filter(w => w.currentStage === 'DELIVERED');
+    const totalProduced = wos.reduce((s,w) => s + (w.produced||0), 0);
+    const totalScrap = wos.reduce((s,w) => s + (w.scrap||0), 0);
+    const scrapRate = totalProduced > 0 ? (totalScrap / (totalProduced + totalScrap)) * 100 : 0;
+    const inMOC = wos.filter(w => w.currentStage === 'AT_MOC').length;
+    const stationsRunning = State.data.stations.filter(s => s.status === 'running').length;
+    const hist = State.data.history?.hourly || [];
+    const last1h = hist.length >= 2 ? Math.max(0, hist[hist.length-1].produced - hist[hist.length-2].produced) : 0;
+    return { active, delivered: delivered.length, totalProduced, totalScrap, scrapRate, inMOC, stationsRunning, last1h };
+  },
+
+  kpiHTML(m) {
     const ar = State.lang === 'ar';
-    const k = (label, val, accent, bg, sub) => `
+    const k = (id, label, val, accent, bg, sub) => `
       <div class="kpi" style="--accent:${accent};--accent-bg:${bg}">
         <div class="kpi-label">${label}</div>
-        <div class="kpi-value">${val}</div>
+        <div class="kpi-value" id="${id}">${val}</div>
         ${sub?`<div class="kpi-delta neutral">${sub}</div>`:''}
       </div>`;
     return [
-      k(ar?'WO نشط':'Active WO', activeCount, 'var(--gold)', 'rgba(245,185,66,0.1)', ar?'في الإنتاج الآن':'in production'),
-      k(ar?'إجمالي المنتج':'Total Produced', fmt.num(produced), 'var(--emerald)', 'rgba(16,185,129,0.1)', ar?'وحدة':'units'),
-      k(ar?'نسبة الـ Scrap':'Scrap Rate', fmt.pct(scrapRate,2), scrapRate>2?'var(--rose)':'var(--emerald)', scrapRate>2?'rgba(244,63,94,0.1)':'rgba(16,185,129,0.1)', scrapRate>2?(ar?'مرتفع':'high'):(ar?'ضمن الحد':'within target')),
-      k(ar?'بانتظار MOC':'Awaiting MOC', inMOC, 'var(--violet)', 'rgba(167,139,250,0.1)', ar?'دفعة':'batches'),
-      k(ar?'محطات شغّالة':'Running Stations', running + '/5', 'var(--sky)', 'rgba(56,189,248,0.1)', ar?'من 5':'of 5'),
-      k(ar?'تم تسليم':'Delivered', delivered, 'var(--teal)', 'rgba(20,184,166,0.1)', ar?'دفعة':'total'),
+      k('kpiActive', ar?'WO نشط':'Active WO', m.active.length, 'var(--gold)', 'rgba(245,185,66,0.1)', ar?'في الإنتاج الآن':'in production'),
+      k('kpiProduced', ar?'إجمالي المنتج':'Total Produced', fmt.num(m.totalProduced), 'var(--emerald)', 'rgba(16,185,129,0.1)', ar?'وحدة':'units'),
+      k('kpiScrap', ar?'نسبة الـ Scrap':'Scrap Rate', m.scrapRate.toFixed(2)+'%', m.scrapRate>2?'var(--rose)':'var(--emerald)', m.scrapRate>2?'rgba(244,63,94,0.1)':'rgba(16,185,129,0.1)', m.scrapRate>2?(ar?'مرتفع':'high'):(ar?'ضمن الحد':'within target')),
+      k('kpiMOC', ar?'بانتظار MOC':'Awaiting MOC', m.inMOC, 'var(--violet)', 'rgba(167,139,250,0.1)', ar?'دفعة':'batches'),
+      k('kpiRunning', ar?'محطات شغّالة':'Running Stations', m.stationsRunning + '/5', 'var(--sky)', 'rgba(56,189,248,0.1)', ar?'من 5':'of 5'),
+      k('kpiDelivered', ar?'تم تسليم':'Delivered', m.delivered, 'var(--teal)', 'rgba(20,184,166,0.1)', ar?'دفعة':'total'),
     ].join('');
   },
 
+  // Dynamic pipeline track: WOs ride the line as tokens that move when stages change
   pipelineHTML() {
-    const counts = Q.woCountByStage();
     const ar = State.lang === 'ar';
     const stages = STAGE_ORDER.map(id => stageById(id));
-    const html = stages.map((s, i) => {
-      const c = counts[s.id];
+    const total = stages.length;
+
+    // Build stage markers with their position
+    const markers = stages.map((s, i) => {
+      const x = ((i + 0.5) / total) * 100;
       const ownerId = Q.ownerOfStage(s.id);
       const owner = ownerId ? Q.user(ownerId) : null;
-      const dept = Q.dept(s.dept);
-      const isActive = c > 0;
-      const hasFlow = c > 0 && i < stages.length - 1 && counts[stages[i+1]?.id] !== undefined;
-      return `<div class="stage ${isActive?'active':'idle'} ${hasFlow?'has-flow':''}" onclick="View.filterByStage('${s.id}')">
-        ${c > 0 ? `<div class="stage-count">${c}</div>` : ''}
-        <div class="stage-node">${s.code}</div>
-        <div class="stage-name">${escapeHTML(ar?s.name:s.nameEn)}</div>
-        ${owner ? `<div class="stage-user"><span class="ouser">${escapeHTML(owner.avatar)}</span> ${escapeHTML((ar?owner.name:owner.nameEn).split(' ').slice(0,2).join(' '))}</div>` : '<div class="stage-user">—</div>'}
+      const counts = Q.woCountByStage();
+      const c = counts[s.id] || 0;
+      const ownerLabel = owner ? `${owner.avatar}` : '';
+      return `<div class="stage-marker ${c>0?'has-wo':''}" style="${ar?'right':'left'}:${x}%" onclick="View.filterByStage('${s.id}')">
+        <div class="stage-marker-label">${s.code}${ownerLabel?` · ${ownerLabel}`:''}</div>
       </div>`;
     }).join('');
+
+    // Compute WO positions on the track based on currentStage
+    // Group WOs by stage so they don't overlap perfectly
+    const activeWOs = State.data.workOrders.filter(w => !['DELIVERED','REJECTED'].includes(w.currentStage));
+    const woByStage = {};
+    activeWOs.forEach(w => {
+      if (!woByStage[w.currentStage]) woByStage[w.currentStage] = [];
+      woByStage[w.currentStage].push(w);
+    });
+
+    let tokens = '';
+    Object.keys(woByStage).forEach(stage => {
+      const stageIdx = STAGE_ORDER.indexOf(stage);
+      if (stageIdx < 0) return;
+      const baseX = ((stageIdx + 0.5) / total) * 100;
+      woByStage[stage].forEach((w, idx) => {
+        // slight horizontal offset for multiple WOs at same stage
+        const offsetPct = (idx - (woByStage[stage].length-1)/2) * 1.2;
+        const x = baseX + offsetPct;
+        const justMoved = w._justMoved ? 'just-moved' : '';
+        const priority = w.priority === 'high' ? 'priority-high' : '';
+        const dirAttr = ar ? `right:${x}%` : `left:${x}%`;
+        tokens += `<div class="wo-token ${priority} ${justMoved}" style="${dirAttr}" data-wo="${w.id}" onclick="Action.openWO('${w.id}')">
+          <div class="wo-token-id">${w.id.split('-').pop()}</div>
+          <div class="wo-token-qty">${fmt.num(w.produced||w.qty)}</div>
+        </div>`;
+      });
+    });
+
+    if (activeWOs.length === 0) {
+      tokens = `<div class="wo-token-empty">${ar?'لا توجد WOs في الخط حالياً':'No WOs on the line right now'}</div>`;
+    }
+
     return `
       <div class="pipeline-head">
         <div class="pipeline-title">${ar?'مسار الإنتاج المباشر':'Live Production Pipeline'}</div>
-        <div class="text-mute" style="font-size:11px">${ar?'كل مرحلة لها مسؤول مرتبط بقسمه':'Each stage has its responsible operator'}</div>
+        <div class="text-mute" style="font-size:11px">${activeWOs.length} ${ar?'WO على الخط · حركة لايف':'WOs on the line · live tracking'}</div>
       </div>
-      <div class="pipeline-stages">${html}</div>
+      <div class="pipeline-track" id="pipelineTrack">
+        ${markers}
+        ${tokens}
+      </div>
     `;
+  },
+
+  // ─── CHART HTML BUILDERS ───
+  chartThroughputHTML() {
+    const hist = State.data.history?.hourly || [];
+    if (hist.length < 2) return '<div class="empty-state" style="padding:24px">جاري جمع البيانات...</div>';
+    // Convert cumulative produced into hourly diffs
+    const data = [];
+    for (let i = 1; i < hist.length; i++) {
+      const diff = Math.max(0, hist[i].produced - hist[i-1].produced);
+      const d = new Date(hist[i].ts);
+      data.push({ value: diff, label: d.getHours().toString().padStart(2,'0')+':00' });
+    }
+    return Chart.line(data, { width: 400, height: 130 });
+  },
+
+  chartStationsHTML() {
+    const ar = State.lang === 'ar';
+    const rows = State.data.stations.map(s => {
+      const pct = s.target > 0 ? Math.min(100, (s.produced / s.target) * 100) : 0;
+      return {
+        code: s.code,
+        pct,
+        status: s.status,
+        stat: s.target > 0 ? `${pct.toFixed(0)}%` : '—',
+      };
+    });
+    return Chart.radialBars(rows);
+  },
+
+  chartDistHTML() {
+    const ar = State.lang === 'ar';
+    const counts = Q.woCountByStage();
+    // Group into 4 buckets for clarity
+    const buckets = {
+      'pre': { value: 0, label: ar?'قبل الإنتاج':'Pre-prod', color: '#14b8a6' },
+      'prod': { value: 0, label: ar?'في الإنتاج':'Production', color: '#38bdf8' },
+      'qc': { value: 0, label: 'MOC', color: '#a78bfa' },
+      'post': { value: 0, label: ar?'بعد الإنتاج':'Post-prod', color: '#10b981' },
+    };
+    Object.entries(counts).forEach(([stage, c]) => {
+      if (['CREATED','MAT_REQUEST','MAT_ISSUED'].includes(stage)) buckets.pre.value += c;
+      else if (['AT_K1','AT_K2','AT_K3','AT_K4'].includes(stage)) buckets.prod.value += c;
+      else if (stage === 'AT_MOC') buckets.qc.value += c;
+      else if (['AT_PMF','AT_GDN'].includes(stage)) buckets.post.value += c;
+    });
+    return Chart.donut(Object.values(buckets), { centerLabel: ar?'WOs نشطة':'Active WOs' });
+  },
+
+  chartScrapHTML() {
+    const hist = State.data.history?.hourly || [];
+    if (hist.length < 2) return '<div class="empty-state" style="padding:24px">جاري جمع البيانات...</div>';
+    const data = hist.map((h, i) => {
+      const total = (h.produced + h.scrap) || 1;
+      return { value: (h.scrap / total) * 100, label: i % 6 === 0 ? new Date(h.ts).getHours().toString().padStart(2,'0')+':00' : '' };
+    });
+    return Chart.line(data, { width: 400, height: 130 });
+  },
+
+  chartOEEHTML(m) {
+    // Simplified OEE: Availability × Performance × Quality
+    const availability = State.data.stations.filter(s => s.status !== 'maintenance').length / State.data.stations.length * 100;
+    const performance = State.data.stations.reduce((sum, s) => {
+      if (s.target > 0) return sum + Math.min(100, (s.produced/s.target)*100);
+      return sum;
+    }, 0) / Math.max(1, State.data.stations.filter(s => s.target > 0).length);
+    const quality = 100 - m.scrapRate;
+    const oee = (availability * performance * quality) / 10000;
+    return Chart.gauge(oee, { label: State.lang==='ar'?'الفعالية العامة':'Effectiveness' });
   },
 
   stationsHTML() {
@@ -1685,14 +2361,14 @@ const View = {
         <div class="station-stats">
           <div>
             <div class="station-stat-label">${ar?'مُنتج':'Produced'}</div>
-            <div class="station-stat-value">${fmt.num(s.produced)}</div>
+            <div class="station-stat-value" id="stProduced-${s.id}">${fmt.num(s.produced)}</div>
           </div>
           <div>
             <div class="station-stat-label">${ar?'الهدف':'Target'}</div>
             <div class="station-stat-value">${fmt.num(s.target)}</div>
           </div>
         </div>
-        <div class="station-progress"><div class="station-progress-fill" style="width:${pct}%"></div></div>
+        <div class="station-progress"><div class="station-progress-fill" id="stFill-${s.id}" style="width:${pct}%"></div></div>
         <div class="station-operator">
           <span class="user-avatar" style="width:18px;height:18px;font-size:9px;background:${op?.color||'#666'}">${op?.avatar||'?'}</span>
           <span class="opname">${op ? escapeHTML((ar?op.name:op.nameEn).split(' ').slice(0,2).join(' ')) : '—'}</span>
@@ -1708,7 +2384,7 @@ const View = {
     const icons = { ok:'✓', warn:'⚠', err:'✕', info:'ℹ' };
     return items.map(m => {
       const u = Q.user(m.user);
-      return `<div class="ticker-item">
+      return `<div class="ticker-item" data-mid="${m.id}">
         <div class="ticker-icon ${m.type}">${icons[m.type]||'•'}</div>
         <div class="ticker-body">
           <div class="ticker-msg">${escapeHTML(m.msg)}</div>
@@ -1748,21 +2424,71 @@ const View = {
     </table></div>`;
   },
 
+  // Smart refresh — animate counters, slide tokens, update charts only when data changed
   refreshDashboard() {
-    const wos = State.data.workOrders;
-    const active = wos.filter(w => w.currentStage !== 'DELIVERED' && w.currentStage !== 'REJECTED');
-    const delivered = wos.filter(w => w.currentStage === 'DELIVERED').length;
-    const totalProduced = wos.reduce((s,w) => s + (w.produced||0), 0);
-    const totalScrap = wos.reduce((s,w) => s + (w.scrap||0), 0);
-    const scrapRate = totalProduced > 0 ? (totalScrap / (totalProduced + totalScrap)) * 100 : 0;
-    const inMOC = wos.filter(w => w.currentStage === 'AT_MOC').length;
-    const running = State.data.stations.filter(s => s.status === 'running').length;
-    const kg = document.getElementById('kpiGrid');
-    if (kg) kg.innerHTML = this.kpiHTML(active.length, totalProduced, scrapRate, inMOC, running, delivered);
-    const sg = document.getElementById('stationGrid');
-    if (sg) sg.innerHTML = this.stationsHTML();
+    History.push();
+    const m = this._metrics();
+    const old = this._lastMetrics || m;
+
+    // Animate KPI counters
+    const animateEl = (id, oldVal, newVal, format) => {
+      const el = document.getElementById(id);
+      if (!el || oldVal === newVal) return;
+      Animate.counter(el, oldVal, newVal, { formatter: format });
+    };
+    animateEl('kpiActive', old.active.length, m.active.length, v => fmt.num(v));
+    animateEl('kpiProduced', old.totalProduced, m.totalProduced, v => fmt.num(v));
+    animateEl('kpiMOC', old.inMOC, m.inMOC, v => fmt.num(v));
+    animateEl('kpiDelivered', old.delivered, m.delivered, v => fmt.num(v));
+    if (Math.abs(old.scrapRate - m.scrapRate) > 0.005) {
+      const el = document.getElementById('kpiScrap');
+      if (el) Animate.counter(el, old.scrapRate, m.scrapRate, { formatter: v => v.toFixed(2)+'%' });
+    }
+    if (old.stationsRunning !== m.stationsRunning) {
+      const el = document.getElementById('kpiRunning');
+      if (el) { el.textContent = m.stationsRunning + '/5'; el.classList.add('counter-pulse'); setTimeout(()=>el.classList.remove('counter-pulse'),700); }
+    }
+
+    // Update chart meta labels
+    const tm = document.getElementById('throughputMeta');
+    if (tm) tm.textContent = `+${fmt.num(m.last1h)} ${State.lang==='ar'?'/ساعة':'/h'}`;
+    const sm = document.getElementById('scrapMeta');
+    if (sm) { sm.textContent = m.scrapRate.toFixed(2) + '%'; sm.style.color = m.scrapRate > 2 ? 'var(--rose)' : 'var(--emerald)'; }
+
+    // Update station produced counters with animation
+    State.data.stations.forEach(s => {
+      const oldS = old._stationSnapshots?.[s.id];
+      if (oldS && oldS.produced !== s.produced) {
+        const el = document.getElementById('stProduced-' + s.id);
+        if (el) Animate.counter(el, oldS.produced, s.produced, { formatter: v => fmt.num(v) });
+        const fill = document.getElementById('stFill-' + s.id);
+        if (fill && s.target > 0) fill.style.width = Math.min(100, (s.produced/s.target)*100) + '%';
+      }
+    });
+    m._stationSnapshots = {};
+    State.data.stations.forEach(s => { m._stationSnapshots[s.id] = { produced: s.produced }; });
+
+    // Update charts (regenerate inner HTML — SVG transitions handle smoothness)
+    const updateChart = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+    updateChart('chartThroughput', this.chartThroughputHTML());
+    updateChart('chartStations', this.chartStationsHTML());
+    updateChart('chartDist', this.chartDistHTML());
+    updateChart('chartScrap', this.chartScrapHTML());
+    updateChart('chartOEE', this.chartOEEHTML(m));
+
+    // Update pipeline track — tokens slide via CSS transition
     const pl = document.getElementById('pipeline');
     if (pl) pl.innerHTML = this.pipelineHTML();
+
+    // Refresh ticker if new movements arrived
+    const tl = document.getElementById('tickerList');
+    if (tl) {
+      const currentFirst = tl.querySelector('.ticker-item')?.dataset?.mid;
+      const newFirst = State.data.movements[0]?.id;
+      if (currentFirst !== newFirst) tl.innerHTML = this.tickerHTML();
+    }
+
+    this._lastMetrics = m;
   },
 
   filterByStage(stageId) {
