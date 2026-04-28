@@ -1282,11 +1282,13 @@ const STAGES = [
   { id: 'AT_MOC',           name: 'MOC — فحص نهائي',     nameEn: 'MOC — Final QC',   dept: 'QC',   code: 'MOC' },
   { id: 'AT_PMF',           name: 'مستودع PMF',           nameEn: 'PMF Warehouse',    dept: 'PMF',  code: 'PMF' },
   { id: 'AT_GDN',           name: 'مستودع GDN',           nameEn: 'GDN Warehouse',    dept: 'GDN',  code: 'GDN' },
+  { id: 'AT_COMMITTEE',     name: 'لجنة القبول',          nameEn: 'Acceptance Committee', dept: 'MGMT', code: 'ACC' },
   { id: 'DELIVERED',        name: 'تم التسليم',           nameEn: 'Delivered',        dept: 'GDN',  code: 'OUT' },
   { id: 'REJECTED',         name: 'مرفوض من MOC',         nameEn: 'Rejected by MOC',  dept: 'QC',   code: 'REJ' },
+  { id: 'RETURNED',         name: 'مرتجع للفحص',          nameEn: 'Returned for Review', dept: 'PMF', code: 'RET' },
 ];
 
-const STAGE_ORDER = ['CREATED','MAT_REQUEST','MAT_ISSUED','AT_K1','AT_K2','AT_K3','AT_K4','AT_MOC','AT_PMF','AT_GDN','DELIVERED'];
+const STAGE_ORDER = ['CREATED','MAT_REQUEST','MAT_ISSUED','AT_K1','AT_K2','AT_K3','AT_K4','AT_MOC','AT_PMF','AT_GDN','AT_COMMITTEE','DELIVERED'];
 const stageById = (id) => {
   const base = STAGES.find(s => s.id === id);
   if (!base) return null;
@@ -1390,6 +1392,13 @@ const Seed = {
       stockMovements: [],
       suppliers: [],
       maintenanceRequests: [],
+      committee: {
+        members: [],
+        requiredApprovals: 3,
+        enabled: false,
+      },
+      committeeReviews: [],
+      returns: [],
       audit: [
         { id: uid('AUD'), ts: now(), user: 'system', userName: 'النظام', action: 'system_init', entity: 'System', entityId: 'init', details: { note: 'تهيئة النظام بدون بيانات تجريبية' } },
       ],
@@ -1448,9 +1457,14 @@ const WF = {
   advance(woId, opts = {}) {
     const wo = Q.wo(woId);
     if (!wo) return false;
-    const next = nextStage(wo.currentStage);
+    let next = nextStage(wo.currentStage);
     if (!next) { toast(State.lang === 'ar' ? 'لا توجد مرحلة تالية' : 'No next stage', 'warn'); return false; }
     if (!Perm.canActOnWO(wo)) { toast(t('no_perm'), 'error'); return false; }
+
+    // If next is AT_COMMITTEE but committee is disabled, skip it
+    if (next === 'AT_COMMITTEE' && !State.data.committee?.enabled) {
+      next = nextStage('AT_COMMITTEE'); // = DELIVERED
+    }
 
     const fromUser = State.user.id;
     const toUser = Q.ownerOfStage(next);
@@ -1904,6 +1918,8 @@ const App = {
         { route: 'warehouses',  label: t('nav_wh'),       icon: 'wh' },
         { route: 'suppliers',   label: State.lang==='ar'?'الموردون':'Suppliers',  icon: 'wh' },
         { route: 'quality',     label: t('nav_quality'),  icon: 'qc', badge: State.data.workOrders.filter(w=>w.currentStage==='AT_MOC').length },
+        { route: 'committee',   label: State.lang==='ar'?'لجنة القبول':'Committee',  icon: 'qc', badge: State.data.workOrders.filter(w=>w.currentStage==='AT_COMMITTEE').length },
+        { route: 'returns',     label: State.lang==='ar'?'المرتجعات':'Returns',  icon: 'wh', badge: State.data.workOrders.filter(w=>w.currentStage==='RETURNED').length },
         { route: 'maintenance', label: t('nav_maint'),    icon: 'maint', badge: (State.data.maintenanceRequests||[]).filter(m=>m.status==='requested'||m.status==='in_progress').length },
       ]},
       { group: t('nav_compliance'), items: [
@@ -1959,6 +1975,8 @@ const App = {
       warehouses:  View.warehouses,
       suppliers:   View.suppliers,
       quality:     View.quality,
+      committee:   View.committee,
+      returns:     View.returns,
       maintenance: View.maintenance,
       trace:       View.trace,
       audit:       View.audit,
@@ -2931,6 +2949,245 @@ View.quality = function() {
 };
 
 // ─────── MAINTENANCE ───────
+// ─────── ACCEPTANCE COMMITTEE ───────
+View.committee = function() {
+  const ar = State.lang === 'ar';
+  const cfg = State.data.committee || { members: [], requiredApprovals: 3, enabled: false };
+  const members = cfg.members || [];
+  const isMgr = Perm.isManager();
+  const isMember = members.some(m => m.userId === State.user.id);
+  const pending = State.data.workOrders.filter(w => w.currentStage === 'AT_COMMITTEE');
+  const reviews = State.data.committeeReviews || [];
+
+  document.getElementById('content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">${ar?'لجنة القبول':'Acceptance Committee'}</div>
+        <div class="page-sub">${ar?'مراجعة نهائية للدفعات قبل التسليم — يحتاج '+cfg.requiredApprovals+' توقيعات للموافقة':'Final batch review before delivery — requires '+cfg.requiredApprovals+' signatures to approve'}</div>
+      </div>
+      <div class="page-actions">
+        ${isMgr ? `<button class="btn btn-secondary" onclick="Action.committeeSettings()">⚙ ${ar?'إعدادات اللجنة':'Committee Settings'}</button>` : ''}
+      </div>
+    </div>
+
+    ${!cfg.enabled ? `
+      <div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);border-radius:9px;padding:14px;margin-bottom:14px;font-size:12px;color:var(--amber)">
+        ⚠ <b>${ar?'لجنة القبول معطّلة حالياً':'Committee currently disabled'}</b>
+        <div style="margin-top:6px;color:var(--text-2)">${ar?'الـ WOs تنتقل من GDN إلى DELIVERED مباشرة بدون مراجعة. لتفعيل اللجنة، اضغط "إعدادات اللجنة" وفعّلها.':'WOs move from GDN to DELIVERED directly without review. To enable, click "Committee Settings".'}</div>
+      </div>
+    ` : ''}
+
+    <div class="kpi-grid">
+      <div class="kpi" style="--accent:var(--violet);--accent-bg:rgba(167,139,250,0.1)">
+        <div class="kpi-label">${ar?'بانتظار المراجعة':'Pending Review'}</div>
+        <div class="kpi-value">${pending.length}</div>
+      </div>
+      <div class="kpi" style="--accent:var(--gold);--accent-bg:rgba(245,185,66,0.1)">
+        <div class="kpi-label">${ar?'أعضاء اللجنة':'Members'}</div>
+        <div class="kpi-value">${members.length}</div>
+      </div>
+      <div class="kpi" style="--accent:var(--emerald);--accent-bg:rgba(16,185,129,0.1)">
+        <div class="kpi-label">${ar?'النصاب':'Quorum'}</div>
+        <div class="kpi-value">${cfg.requiredApprovals}</div>
+      </div>
+      <div class="kpi" style="--accent:var(--sky);--accent-bg:rgba(56,189,248,0.1)">
+        <div class="kpi-label">${ar?'مراجعات سابقة':'Past Reviews'}</div>
+        <div class="kpi-value">${reviews.length}</div>
+      </div>
+    </div>
+
+    ${members.length === 0 && isMgr ? `
+      <div class="card mt-2">
+        <div class="card-title">⚙ ${ar?'لم يتم تعيين أعضاء بعد':'No members assigned yet'}</div>
+        <div style="font-size:12px;color:var(--text-2);margin-bottom:12px">${ar?'لتفعيل اللجنة، يجب تعيين 3 أعضاء على الأقل من أقسام مختلفة.':'To activate the committee, at least 3 members from different departments must be assigned.'}</div>
+        <button class="btn btn-primary" onclick="Action.committeeSettings()">${ar?'إعدادات اللجنة':'Committee Settings'}</button>
+      </div>
+    ` : ''}
+
+    ${members.length > 0 ? `
+      <div class="card mt-2">
+        <div class="card-title">${ar?'أعضاء اللجنة':'Committee Members'}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px">
+          ${members.map(m => {
+            const u = Q.user(m.userId);
+            if (!u) return '';
+            const dept = Q.dept(u.dept);
+            return `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--glass-2);border-radius:8px;border:1px solid var(--border)">
+              <span class="user-avatar" style="width:28px;height:28px;font-size:12px;background:${u.color}">${u.avatar}</span>
+              <div>
+                <div style="font-size:12.5px;font-weight:600">${escapeHTML(ar?u.name:u.nameEn)}</div>
+                <div style="font-size:10.5px;color:var(--text-3)"><span class="dept-tag" style="--dept-color:${dept.color};--dept-bg:${dept.bg};font-size:9.5px;padding:2px 6px">${escapeHTML(ar?dept.name:dept.nameEn)}</span></div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+    ` : ''}
+
+    <div class="card mt-2">
+      <div class="card-title">${ar?'دفعات بانتظار المراجعة':'Batches Awaiting Review'} (${pending.length})</div>
+      ${pending.length === 0 ? `<div class="empty-state">${ar?'لا توجد دفعات بانتظار المراجعة':'No batches awaiting review'}</div>` : `
+        <div style="overflow-x:auto"><table class="data">
+          <thead><tr>
+            <th>WO</th>
+            <th>${ar?'الكمية':'Qty'}</th>
+            <th>${ar?'مُنتج':'Produced'}</th>
+            <th>${ar?'Scrap':'Scrap'}</th>
+            <th>${ar?'في GDN منذ':'In GDN since'}</th>
+            <th>${ar?'التوقيعات':'Signatures'}</th>
+            <th></th>
+          </tr></thead>
+          <tbody>${pending.map(w => {
+            const reviewsForWO = reviews.filter(r => r.woId === w.id);
+            const approvals = reviewsForWO.filter(r => r.decision === 'approve').length;
+            const rejections = reviewsForWO.filter(r => r.decision === 'reject').length;
+            const myReview = reviewsForWO.find(r => r.userId === State.user.id);
+            const arrivedAt = w.history.find(h => h.stage === 'AT_COMMITTEE')?.ts || w.history.slice(-1)[0]?.ts;
+            return `<tr>
+              <td class="mono"><b>${w.id}</b></td>
+              <td class="mono">${fmt.num(w.qty)}</td>
+              <td class="mono">${fmt.num(w.produced)}</td>
+              <td class="mono">${fmt.num(w.scrap)}</td>
+              <td class="mono text-mute">${fmt.ago(arrivedAt)}</td>
+              <td>
+                <span style="color:var(--emerald);font-weight:700">✓${approvals}</span>
+                <span style="margin:0 6px;color:var(--text-3)">/</span>
+                <span style="color:var(--rose);font-weight:700">✕${rejections}</span>
+                <div style="font-size:10px;color:var(--text-3)">${ar?'يحتاج':'needs'} ${cfg.requiredApprovals}</div>
+              </td>
+              <td>
+                ${isMember && !myReview ? `<button class="btn btn-sm btn-primary" onclick="Action.committeeReview('${w.id}')">${ar?'مراجعة':'Review'}</button>` :
+                  myReview ? `<span class="badge-status ${myReview.decision==='approve'?'b-completed':'b-rejected'}">${myReview.decision==='approve'?(ar?'✓ وافقت':'✓ Approved'):(ar?'✕ رفضت':'✕ Rejected')}</span>` :
+                  `<button class="btn btn-sm btn-secondary" onclick="Action.openWO('${w.id}')">${ar?'تفاصيل':'Details'}</button>`}
+              </td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+      `}
+    </div>
+
+    ${reviews.length > 0 ? `
+      <div class="card mt-2">
+        <div class="card-title">${ar?'سجل المراجعات':'Review History'} (${ar?'آخر 20':'last 20'})</div>
+        <div style="overflow-x:auto"><table class="data">
+          <thead><tr>
+            <th>${ar?'التاريخ':'Date'}</th>
+            <th>WO</th>
+            <th>${ar?'العضو':'Member'}</th>
+            <th>${ar?'القرار':'Decision'}</th>
+            <th>${ar?'ملاحظات':'Notes'}</th>
+          </tr></thead>
+          <tbody>${reviews.slice(0,20).map(r => {
+            const u = Q.user(r.userId);
+            return `<tr>
+              <td class="mono" style="font-size:10.5px">${fmt.date(r.ts)}</td>
+              <td class="mono"><b>${r.woId}</b></td>
+              <td>${u?escapeHTML(ar?u.name:u.nameEn):'—'}</td>
+              <td><span class="badge-status ${r.decision==='approve'?'b-completed':'b-rejected'}">${r.decision==='approve'?(ar?'✓ موافق':'✓ Approve'):(ar?'✕ رفض':'✕ Reject')}</span></td>
+              <td class="text-mute" style="font-size:11px">${escapeHTML(r.notes||'—')}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+      </div>
+    ` : ''}
+  `;
+};
+
+// ─────── RETURNS ───────
+View.returns = function() {
+  const ar = State.lang === 'ar';
+  const returned = State.data.workOrders.filter(w => w.currentStage === 'RETURNED');
+  const allReturns = State.data.returns || [];
+
+  document.getElementById('content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">${ar?'المرتجعات':'Returns'}</div>
+        <div class="page-sub">${ar?'الدفعات المرتجعة من GDN أو من اللجنة — تحتاج إعادة فحص أو شطب':'Batches returned from GDN or Committee — need re-inspection or write-off'}</div>
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi" style="--accent:var(--rose);--accent-bg:rgba(244,63,94,0.1)">
+        <div class="kpi-label">${ar?'بانتظار الفحص':'Awaiting Review'}</div>
+        <div class="kpi-value">${returned.length}</div>
+      </div>
+      <div class="kpi" style="--accent:var(--amber);--accent-bg:rgba(245,158,11,0.1)">
+        <div class="kpi-label">${ar?'إجمالي المرتجعات':'Total Returns'}</div>
+        <div class="kpi-value">${allReturns.length}</div>
+      </div>
+      <div class="kpi" style="--accent:var(--emerald);--accent-bg:rgba(16,185,129,0.1)">
+        <div class="kpi-label">${ar?'أُعيد للإنتاج':'Reprocessed'}</div>
+        <div class="kpi-value">${allReturns.filter(r=>r.disposition==='reprocess').length}</div>
+      </div>
+      <div class="kpi" style="--accent:var(--text-3);--accent-bg:rgba(255,255,255,0.04)">
+        <div class="kpi-label">${ar?'تم شطبها (Scrap)':'Scrapped'}</div>
+        <div class="kpi-value">${allReturns.filter(r=>r.disposition==='scrap').length}</div>
+      </div>
+    </div>
+
+    <div class="card mt-2">
+      <div class="card-title">${ar?'مرتجعات بانتظار الفحص':'Returns Awaiting Review'} (${returned.length})</div>
+      ${returned.length === 0 ? `<div class="empty-state">${ar?'لا توجد مرتجعات بانتظار الفحص':'No returns awaiting review'}</div>` : `
+        <div style="overflow-x:auto"><table class="data">
+          <thead><tr>
+            <th>WO</th>
+            <th>${ar?'الكمية المرتجعة':'Returned Qty'}</th>
+            <th>${ar?'السبب':'Reason'}</th>
+            <th>${ar?'مصدر الإرجاع':'Source'}</th>
+            <th>${ar?'تاريخ':'Date'}</th>
+            <th></th>
+          </tr></thead>
+          <tbody>${returned.map(w => {
+            const ret = allReturns.find(r => r.woId === w.id && r.status === 'pending');
+            const canDecide = State.user.dept === 'PMF' || State.user.dept === 'QC' || Perm.isManager();
+            return `<tr>
+              <td class="mono"><b>${w.id}</b></td>
+              <td class="mono">${ret?fmt.num(ret.qty):'—'}</td>
+              <td>${ret?escapeHTML(ret.reason):'—'}</td>
+              <td>${ret?escapeHTML(ret.source||'—'):'—'}</td>
+              <td class="mono text-mute" style="font-size:11px">${ret?fmt.date(ret.ts):'—'}</td>
+              <td>${canDecide && ret ? `
+                <button class="btn btn-sm btn-primary" onclick="Action.returnDecision('${w.id}','reprocess')">${ar?'إعادة للإنتاج':'Reprocess'}</button>
+                <button class="btn btn-sm btn-secondary" onclick="Action.returnDecision('${w.id}','scrap')">${ar?'شطب':'Scrap'}</button>
+              ` : `<button class="btn btn-sm btn-secondary" onclick="Action.openWO('${w.id}')">${ar?'تفاصيل':'Details'}</button>`}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+      `}
+    </div>
+
+    ${allReturns.length > 0 ? `
+      <div class="card mt-2">
+        <div class="card-title">${ar?'سجل كل المرتجعات':'All Returns Log'}</div>
+        <div style="overflow-x:auto"><table class="data">
+          <thead><tr>
+            <th>${ar?'التاريخ':'Date'}</th>
+            <th>WO</th>
+            <th>${ar?'الكمية':'Qty'}</th>
+            <th>${ar?'السبب':'Reason'}</th>
+            <th>${ar?'القرار':'Decision'}</th>
+            <th>${ar?'بواسطة':'By'}</th>
+          </tr></thead>
+          <tbody>${allReturns.slice(0,30).map(r => {
+            const reqr = Q.user(r.requestedBy);
+            const decider = r.decidedBy ? Q.user(r.decidedBy) : null;
+            return `<tr>
+              <td class="mono" style="font-size:10.5px">${fmt.date(r.ts)}</td>
+              <td class="mono"><b>${r.woId}</b></td>
+              <td class="mono">${fmt.num(r.qty)}</td>
+              <td>${escapeHTML(r.reason)}</td>
+              <td><span class="badge-status ${r.disposition==='reprocess'?'b-progress':r.disposition==='scrap'?'b-rejected':'b-pending'}">${r.disposition===null||r.disposition===undefined?(State.lang==='ar'?'بانتظار':'pending'):r.disposition}</span></td>
+              <td>${decider?escapeHTML(ar?decider.name:decider.nameEn):reqr?escapeHTML(ar?reqr.name:reqr.nameEn):'—'}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+      </div>
+    ` : ''}
+  `;
+};
+
+
 View.maintenance = function() {
   const ar = State.lang === 'ar';
   const reqs = State.data.maintenanceRequests || [];
@@ -3407,9 +3664,13 @@ const Action = {
       </div>
     `;
 
+    const canReturn = (wo.currentStage === 'AT_GDN' || wo.currentStage === 'DELIVERED') &&
+                      (State.user.dept === 'GDN' || State.user.dept === 'PMF' || Perm.isManager());
+
     const footer = `
       <button class="btn btn-secondary" onclick="App.closeModal()">${t('close')}</button>
       <button class="btn btn-secondary" onclick="App.closeModal();App.goto('trace');setTimeout(()=>{document.getElementById('traceQuery').value='${woId}';View.runTrace()},50)">${ar?'فتح في التتبع':'Open in Trace'}</button>
+      ${canReturn ? `<button class="btn btn-secondary" onclick="App.closeModal();Action.initiateReturn('${woId}')" style="color:var(--rose)">${ar?'↩ إرجاع':'↩ Return'}</button>` : ''}
       ${action && canAct ? `<button class="btn btn-primary" onclick="App.closeModal();${action.handler}">${escapeHTML(action.label)}</button>` : (action?`<span class="text-mute" style="font-size:11px;align-self:center">${t('no_perm')}</span>`:'')}
     `;
     App.openModal(woId, body, footer, true);
@@ -4125,6 +4386,356 @@ const Action = {
       `<button class="btn btn-secondary" onclick="App.closeModal()">${ar?'إغلاق':'Close'}</button>`, true);
   },
 
+  // ─────── COMMITTEE WORKFLOW ───────
+  
+  committeeSettings() {
+    if (!Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
+    const ar = State.lang === 'ar';
+    const cfg = State.data.committee || { members: [], requiredApprovals: 3, enabled: false };
+    // Show ALL active users with their dept (manager picks)
+    const eligibleUsers = State.data.users.filter(u => u.active !== false);
+    const userRows = eligibleUsers.map(u => {
+      const dept = Q.dept(u.dept);
+      const isMember = cfg.members.some(m => m.userId === u.id);
+      return `<label style="display:flex;align-items:center;gap:10px;padding:8px;border-radius:7px;cursor:pointer;${isMember?'background:rgba(245,185,66,0.08);border:1px solid rgba(245,185,66,0.25)':'border:1px solid var(--border)'}">
+        <input type="checkbox" class="cmMember" value="${u.id}" ${isMember?'checked':''} style="cursor:pointer">
+        <span class="user-avatar" style="width:24px;height:24px;font-size:11px;background:${u.color}">${u.avatar}</span>
+        <div style="flex:1">
+          <div style="font-size:12px;font-weight:600">${escapeHTML(ar?u.name:u.nameEn)}</div>
+          <div style="font-size:10.5px;color:var(--text-3)"><span class="dept-tag" style="--dept-color:${dept.color};--dept-bg:${dept.bg};font-size:9.5px;padding:1px 5px">${escapeHTML(ar?dept.name:dept.nameEn)}</span> · ${escapeHTML(ar?u.role:u.roleEn)}</div>
+        </div>
+      </label>`;
+    }).join('');
+
+    const body = `
+      <div class="form-grid">
+        <div style="background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:9px;padding:11px;margin-bottom:14px;font-size:11.5px">
+          ℹ <b style="color:var(--sky)">${ar?'إعدادات لجنة القبول':'Committee Settings'}</b>
+          <div style="margin-top:4px;color:var(--text-2)">${ar?'اللجنة تراجع الدفعات قبل تسليمها النهائي. يحتاج النصاب من التوقيعات للموافقة، وإلا تعود الدفعة لـ PMF كمرتجع.':'Committee reviews batches before final delivery. Needs quorum of signatures to approve, otherwise batch returns to PMF.'}</div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'تفعيل اللجنة':'Enable Committee'}</label>
+            <select id="cmEnabled">
+              <option value="true" ${cfg.enabled?'selected':''}>${ar?'مفعّلة':'Enabled'}</option>
+              <option value="false" ${!cfg.enabled?'selected':''}>${ar?'معطّلة':'Disabled'}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>${ar?'النصاب المطلوب':'Required Approvals'} <span class="req">*</span></label>
+            <input id="cmQuorum" type="number" min="1" max="20" value="${cfg.requiredApprovals||3}">
+            <div style="font-size:10px;color:var(--text-3);margin-top:4px">${ar?'أقل عدد توقيعات للموافقة':'Min signatures to approve'}</div>
+          </div>
+        </div>
+        <div>
+          <label style="display:block;margin-bottom:8px;font-size:12px;color:var(--text-2);font-weight:600">${ar?'اختر أعضاء اللجنة':'Select Members'} (${cfg.members.length} ${ar?'محدد':'selected'})</label>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;max-height:50vh;overflow-y:auto;padding:4px">
+            ${userRows}
+          </div>
+        </div>
+      </div>
+    `;
+    App.openModal(ar?'إعدادات لجنة القبول':'Committee Settings', body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.saveCommitteeSettings()">${t('save')}</button>`, true);
+  },
+
+  saveCommitteeSettings() {
+    const ar = State.lang === 'ar';
+    if (!Perm.isManager()) return;
+    const enabled = document.getElementById('cmEnabled').value === 'true';
+    const quorum = parseInt(document.getElementById('cmQuorum').value) || 3;
+    const checks = document.querySelectorAll('.cmMember:checked');
+    const memberIds = Array.from(checks).map(c => c.value);
+
+    if (enabled && memberIds.length < quorum) {
+      toast(ar?`عدد الأعضاء (${memberIds.length}) أقل من النصاب (${quorum})`:`Members (${memberIds.length}) < quorum (${quorum})`,'error');
+      return;
+    }
+
+    const members = memberIds.map(uid => ({ userId: uid, addedAt: now(), addedBy: State.user.id }));
+    if (!State.data.committee) State.data.committee = {};
+    State.data.committee.enabled = enabled;
+    State.data.committee.requiredApprovals = quorum;
+    State.data.committee.members = members;
+
+    Audit.log('committee_config', 'Committee', 'config', { enabled, quorum, memberCount: members.length });
+    Movements.add('info', `⚙ ${ar?'تحديث إعدادات لجنة القبول':'Committee config updated'} — ${members.length} ${ar?'عضو':'members'}, ${ar?'النصاب':'quorum'}: ${quorum}`, {});
+    State.save();
+    App.closeModal();
+    toast(ar?'✓ تم حفظ الإعدادات':'✓ Settings saved','success');
+    View.committee();
+  },
+
+  // Member submits a review for a WO
+  committeeReview(woId) {
+    const ar = State.lang === 'ar';
+    const wo = Q.wo(woId);
+    if (!wo) return;
+    const cfg = State.data.committee || {};
+    const isMember = (cfg.members||[]).some(m => m.userId === State.user.id);
+    if (!isMember) { toast(ar?'لست عضواً في اللجنة':'You are not a committee member','error'); return; }
+    const existing = (State.data.committeeReviews||[]).find(r => r.woId === woId && r.userId === State.user.id);
+    if (existing) { toast(ar?'لقد راجعت هذا الـ WO مسبقاً':'You already reviewed this WO','info'); return; }
+
+    const body = `
+      <div style="background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.2);border-radius:9px;padding:11px;margin-bottom:14px;font-size:11.5px">
+        🔎 <b style="color:var(--violet)">${ar?'مراجعة دفعة':'Review Batch'}</b> — ${wo.id}
+      </div>
+      <div style="background:var(--glass-2);padding:11px;border-radius:8px;margin-bottom:14px;font-size:12px">
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:5px 14px">
+          <span class="text-mute">${ar?'الكمية:':'Quantity:'}</span><b class="mono">${fmt.num(wo.qty)}</b>
+          <span class="text-mute">${ar?'مُنتج:':'Produced:'}</span><b class="mono">${fmt.num(wo.produced)}</b>
+          <span class="text-mute">${ar?'Scrap:':'Scrap:'}</span><b class="mono">${fmt.num(wo.scrap)}</b>
+          <span class="text-mute">${ar?'الوصف:':'Description:'}</span><span>${escapeHTML(wo.desc||'—')}</span>
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label>${ar?'قرارك':'Your Decision'} <span class="req">*</span></label>
+          <select id="crDecision">
+            <option value="approve">${ar?'✓ موافقة — جاهز للتسليم':'✓ Approve — ready for delivery'}</option>
+            <option value="reject">${ar?'✕ رفض — يحتاج إعادة فحص':'✕ Reject — needs re-inspection'}</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>${ar?'ملاحظات':'Notes'}</label>
+          <textarea id="crNotes" rows="2" placeholder="${ar?'مثال: تم فحص العينات، الجودة ضمن المعايير':'e.g. Samples inspected, quality within spec'}"></textarea>
+        </div>
+      </div>
+    `;
+    App.openModal(`${ar?'مراجعة لجنة القبول':'Committee Review'} — ${woId}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.saveCommitteeReview('${woId}')">${ar?'تأكيد المراجعة':'Submit Review'}</button>`, true);
+  },
+
+  saveCommitteeReview(woId) {
+    const ar = State.lang === 'ar';
+    const wo = Q.wo(woId);
+    if (!wo) return;
+    const decision = document.getElementById('crDecision').value;
+    const notes = document.getElementById('crNotes').value.trim();
+    const cfg = State.data.committee || {};
+
+    if (!State.data.committeeReviews) State.data.committeeReviews = [];
+    State.data.committeeReviews.unshift({
+      id: 'CR-' + State.data.committeeReviews.length + 1,
+      woId, userId: State.user.id, decision, notes, ts: now()
+    });
+    Audit.log('committee_review', 'WorkOrder', woId, { decision, notes: notes.substring(0, 80) });
+    Movements.add(decision==='approve'?'ok':'warn', `${decision==='approve'?'✓':'✕'} ${ar?'مراجعة لجنة':'Committee review'} ${woId} — ${decision}`, { woId });
+
+    // Check if quorum reached
+    const reviews = State.data.committeeReviews.filter(r => r.woId === woId);
+    const approvals = reviews.filter(r => r.decision === 'approve').length;
+    const rejections = reviews.filter(r => r.decision === 'reject').length;
+    const quorum = cfg.requiredApprovals || 3;
+
+    if (approvals >= quorum) {
+      // APPROVED — move to DELIVERED
+      wo.currentStage = 'DELIVERED';
+      wo.currentOwner = null;
+      wo.history.push({ stage: 'DELIVERED', action: 'committee_approved', fromUser: State.user.id, toUser: null, qty: wo.produced, scrap: wo.scrap, ts: now(), notes: `${ar?'موافقة اللجنة':'Committee approved'} (${approvals} ${ar?'موافقات':'approvals'})` });
+      Audit.log('committee_approved', 'WorkOrder', woId, { approvals, total: reviews.length });
+      Movements.add('ok', `🎉 ${ar?'موافقة اللجنة':'Committee APPROVED'} ${woId} — ${ar?'تم التسليم':'delivered'}`, { woId });
+    } else if (rejections >= quorum) {
+      // REJECTED — return to PMF
+      const ret = {
+        id: 'RET-' + ((State.data.returns||[]).length + 1),
+        woId, qty: wo.produced - wo.scrap,
+        reason: ar?`رفضت اللجنة (${rejections} رفض)`:`Committee rejected (${rejections} rejections)`,
+        source: ar?'لجنة القبول':'Acceptance Committee',
+        requestedBy: State.user.id, ts: now(), status: 'pending', disposition: null
+      };
+      if (!State.data.returns) State.data.returns = [];
+      State.data.returns.unshift(ret);
+      wo.currentStage = 'RETURNED';
+      wo.currentOwner = State.data.warehouses.find(w=>w.dept==='PMF')?.managerId || null;
+      wo.history.push({ stage: 'RETURNED', action: 'committee_rejected', fromUser: State.user.id, toUser: wo.currentOwner, qty: wo.produced, scrap: wo.scrap, ts: now(), notes: ret.reason });
+      Audit.log('committee_rejected', 'WorkOrder', woId, { rejections });
+      Movements.add('err', `↩ ${ar?'رفض اللجنة':'Committee REJECTED'} ${woId} — ${ar?'مرتجع لـ PMF':'returned to PMF'}`, { woId });
+    }
+
+    State.save();
+    App.closeModal();
+    toast(ar?'✓ تم تسجيل مراجعتك':'✓ Review submitted','success');
+    View.committee();
+  },
+
+  // Initiate a return on a WO (from GDN or DELIVERED)
+  initiateReturn(woId) {
+    const ar = State.lang === 'ar';
+    const wo = Q.wo(woId);
+    if (!wo) return;
+    const canReturn = State.user.dept === 'GDN' || State.user.dept === 'PMF' || Perm.isManager();
+    if (!canReturn) { toast(t('no_perm'), 'error'); return; }
+
+    const body = `
+      <div style="background:rgba(244,63,94,0.06);border:1px solid rgba(244,63,94,0.25);border-radius:9px;padding:11px;margin-bottom:14px;font-size:11.5px;color:var(--rose)">
+        ↩ <b>${ar?'إرجاع دفعة للفحص':'Return Batch for Review'}</b>
+      </div>
+      <div style="background:var(--glass-2);padding:10px;border-radius:8px;margin-bottom:14px;font-size:12px">
+        <span class="text-mute">${ar?'WO:':'WO:'}</span> <b class="mono">${woId}</b> ·
+        <span class="text-mute">${ar?'الكمية:':'Qty:'}</span> <b class="mono">${fmt.num(wo.qty)}</b> ·
+        <span class="text-mute">${ar?'المرحلة:':'Stage:'}</span> <b>${wo.currentStage}</b>
+      </div>
+      <div class="form-grid">
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'الكمية المرتجعة':'Quantity to Return'} <span class="req">*</span></label>
+            <input id="rtQty" type="number" min="1" max="${wo.produced - wo.scrap}" value="${wo.produced - wo.scrap}">
+          </div>
+          <div class="field">
+            <label>${ar?'نوع العيب':'Defect Type'}</label>
+            <select id="rtType">
+              <option value="quality">${ar?'مشكلة جودة':'Quality issue'}</option>
+              <option value="damage">${ar?'تلف':'Damage'}</option>
+              <option value="contamination">${ar?'تلوّث':'Contamination'}</option>
+              <option value="customer">${ar?'إرجاع من العميل':'Customer return'}</option>
+              <option value="other">${ar?'أخرى':'Other'}</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>${ar?'سبب الإرجاع':'Return Reason'} <span class="req">*</span></label>
+          <textarea id="rtReason" rows="3" placeholder="${ar?'اشرح بالتفصيل لماذا تُرجَع الدفعة':'Explain in detail why returning'}"></textarea>
+        </div>
+        <div class="field">
+          <label>${ar?'ملاحظات إضافية':'Additional Notes'}</label>
+          <textarea id="rtNotes" rows="2"></textarea>
+        </div>
+      </div>
+    `;
+    App.openModal(`${ar?'إرجاع دفعة':'Return Batch'} — ${woId}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-danger" onclick="Action.saveReturn('${woId}')">${ar?'تأكيد الإرجاع':'Confirm Return'}</button>`, true);
+  },
+
+  saveReturn(woId) {
+    const ar = State.lang === 'ar';
+    const wo = Q.wo(woId);
+    if (!wo) return;
+    const qty = parseInt(document.getElementById('rtQty').value);
+    const defectType = document.getElementById('rtType').value;
+    const reason = document.getElementById('rtReason').value.trim();
+    const notes = document.getElementById('rtNotes').value.trim();
+    if (!reason || !qty || qty <= 0) { toast(ar?'الكمية والسبب مطلوبان':'Quantity and reason required','error'); return; }
+
+    if (!State.data.returns) State.data.returns = [];
+    const ret = {
+      id: 'RET-' + (State.data.returns.length + 1),
+      woId, qty, defectType, reason, notes,
+      source: wo.currentStage === 'AT_GDN' ? 'GDN' : wo.currentStage === 'DELIVERED' ? (ar?'العميل':'Customer') : wo.currentStage,
+      requestedBy: State.user.id, ts: now(),
+      status: 'pending', disposition: null
+    };
+    State.data.returns.unshift(ret);
+
+    // Move WO to RETURNED stage (back to PMF custody)
+    const prevStage = wo.currentStage;
+    wo.currentStage = 'RETURNED';
+    wo.currentOwner = State.data.warehouses.find(w=>w.dept==='PMF')?.managerId || null;
+    wo.history.push({ stage: 'RETURNED', action: 'return', fromUser: State.user.id, toUser: wo.currentOwner, qty, scrap: 0, ts: now(), notes: `${ar?'من':'from'} ${prevStage}: ${reason.substring(0, 80)}` });
+
+    Audit.log('return_wo', 'WorkOrder', woId, { qty, prevStage, reason: reason.substring(0,100) });
+    Movements.add('warn', `↩ ${ar?'إرجاع دفعة':'Batch returned'} ${woId} (${fmt.num(qty)}) — ${reason.substring(0,40)}`, { woId, retId: ret.id });
+    State.save();
+    App.closeModal();
+    toast(ar?'✓ تم تسجيل المرتجع — في انتظار قرار PMF/QC':'✓ Return logged — awaiting PMF/QC decision','success');
+    App.goto('returns');
+  },
+
+  // Decide what to do with a returned batch
+  returnDecision(woId, disposition) {
+    const ar = State.lang === 'ar';
+    const wo = Q.wo(woId);
+    const ret = (State.data.returns||[]).find(r => r.woId === woId && r.status === 'pending');
+    if (!wo || !ret) return;
+    const canDecide = State.user.dept === 'PMF' || State.user.dept === 'QC' || Perm.isManager();
+    if (!canDecide) { toast(t('no_perm'), 'error'); return; }
+
+    const dispositionLabel = disposition === 'reprocess' ? (ar?'إعادة للإنتاج':'Reprocess') : (ar?'شطب (Scrap)':'Scrap');
+    const body = `
+      <div style="background:${disposition==='reprocess'?'rgba(56,189,248,0.06)':'rgba(244,63,94,0.06)'};border:1px solid ${disposition==='reprocess'?'rgba(56,189,248,0.25)':'rgba(244,63,94,0.25)'};border-radius:9px;padding:11px;margin-bottom:14px;font-size:11.5px">
+        ${disposition==='reprocess'?'🔄':'🗑'} <b>${dispositionLabel}</b> — ${woId}
+      </div>
+      <div style="background:var(--glass-2);padding:10px;border-radius:8px;margin-bottom:14px;font-size:12px">
+        <div><span class="text-mute">${ar?'الكمية المرتجعة:':'Returned Qty:'}</span> <b class="mono">${fmt.num(ret.qty)}</b></div>
+        <div><span class="text-mute">${ar?'السبب الأصلي:':'Original Reason:'}</span> ${escapeHTML(ret.reason)}</div>
+      </div>
+      ${disposition === 'reprocess' ? `
+        <div class="form-grid">
+          <div class="field">
+            <label>${ar?'مرحلة الإعادة':'Reprocess Stage'} <span class="req">*</span></label>
+            <select id="rdStage">
+              <option value="AT_K1">${ar?'العودة لـ K1 — تجليد':'Back to K1 — Binding'}</option>
+              <option value="AT_K2">${ar?'العودة لـ K2 — تغليف':'Back to K2 — Lamination'}</option>
+              <option value="AT_K3">${ar?'العودة لـ K3 — نقش':'Back to K3 — Embossing'}</option>
+              <option value="AT_K4">${ar?'العودة لـ K4 — تشخيص':'Back to K4 — Pre-Person'}</option>
+              <option value="AT_MOC" selected>${ar?'العودة لـ MOC — فحص نهائي':'Back to MOC — Final QC'}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>${ar?'ملاحظات':'Notes'}</label>
+            <textarea id="rdNotes" rows="2"></textarea>
+          </div>
+        </div>
+      ` : `
+        <div class="form-grid">
+          <div class="field">
+            <label>${ar?'سبب الشطب النهائي':'Final Scrap Reason'} <span class="req">*</span></label>
+            <textarea id="rdNotes" rows="3" placeholder="${ar?'سبب عدم إمكانية الإصلاح':'Why cannot be fixed'}"></textarea>
+          </div>
+        </div>
+        <div style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.25);border-radius:8px;padding:9px;margin-top:8px;font-size:11px;color:var(--amber)">
+          ⚠ ${ar?'الكمية ستُضاف للـ scrap. هذي عملية لا يمكن التراجع عنها.':'Quantity will be added to scrap. This is irreversible.'}
+        </div>
+      `}
+    `;
+    App.openModal(`${dispositionLabel} — ${woId}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn ${disposition==='reprocess'?'btn-primary':'btn-danger'}" onclick="Action.saveReturnDecision('${woId}','${disposition}')">${ar?'تأكيد':'Confirm'}</button>`, true);
+  },
+
+  saveReturnDecision(woId, disposition) {
+    const ar = State.lang === 'ar';
+    const wo = Q.wo(woId);
+    const ret = (State.data.returns||[]).find(r => r.woId === woId && r.status === 'pending');
+    if (!wo || !ret) return;
+    const notes = document.getElementById('rdNotes').value.trim();
+
+    ret.status = 'closed';
+    ret.disposition = disposition;
+    ret.decidedBy = State.user.id;
+    ret.decidedAt = now();
+    ret.decisionNotes = notes;
+
+    if (disposition === 'reprocess') {
+      const stage = document.getElementById('rdStage').value;
+      wo.currentStage = stage;
+      const stationId = stage.replace('AT_','');
+      const station = Q.station(stationId);
+      wo.currentOwner = station?.operatorId || (stage==='AT_MOC'?Q.usersOf('QC')[0]?.id:null);
+      wo.history.push({ stage, action: 'reprocess', fromUser: State.user.id, toUser: wo.currentOwner, qty: ret.qty, scrap: 0, ts: now(), notes: `${ar?'إعادة معالجة':'Reprocess'}: ${notes||'—'}` });
+      Audit.log('return_reprocess', 'WorkOrder', woId, { stage, qty: ret.qty });
+      Movements.add('info', `🔄 ${ar?'إعادة معالجة':'Reprocess'} ${woId} → ${stage}`, { woId });
+      toast(ar?`✓ أُعيدت للمحطة ${stage}`:`✓ Sent back to ${stage}`, 'success');
+    } else {
+      // Scrap — add to wo.scrap
+      wo.scrap += ret.qty;
+      // Move back to a final state — back to GDN or DELIVERED depending on prev
+      wo.currentStage = 'DELIVERED'; // close it as delivered with the scrapped portion noted
+      wo.history.push({ stage: 'DELIVERED', action: 'scrap_return', fromUser: State.user.id, toUser: null, qty: 0, scrap: ret.qty, ts: now(), notes: `${ar?'شطب نهائي:':'Scrapped:'} ${notes}` });
+      Audit.log('return_scrap', 'WorkOrder', woId, { qty: ret.qty, reason: notes.substring(0,100) });
+      Movements.add('err', `🗑 ${ar?'شطب':'Scrap'} ${woId}: ${fmt.num(ret.qty)} ${ar?'وحدة':'units'}`, { woId });
+      toast(ar?`✓ تم الشطب: ${fmt.num(ret.qty)} وحدة`:`✓ Scrapped: ${fmt.num(ret.qty)} units`, 'success');
+    }
+
+    State.save();
+    App.closeModal();
+    App.goto('returns');
+  },
+
   // ─────── ADMIN — USER CRUD ───────
   editUser(id) {
     if (!Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
@@ -4649,6 +5260,13 @@ const Action = {
           <label>${ar?'ملاحظات':'Notes'}</label>
           <textarea id="rcNotes" rows="2" placeholder="${ar?'حالة الشحنة، الفحص، إلخ':'Shipment condition, inspection, etc.'}"></textarea>
         </div>
+        <div style="background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.25);border-radius:8px;padding:10px;margin-top:8px">
+          <label style="display:flex;align-items:flex-start;gap:8px;font-size:11.5px;cursor:pointer">
+            <input type="checkbox" id="rcCommittee" style="width:16px;height:16px;cursor:pointer;margin-top:2px">
+            <span><b style="color:var(--violet)">${ar?'إرسال للجنة الاستلام':'Send to Acceptance Committee'}</b><br>
+            <span style="color:var(--text-3)">${ar?'الكمية ستدخل المخزون فقط بعد توقيع 3 أعضاء (موصى به للمواد الخام)':'Stock added only after 3 members sign (recommended for raw materials)'}</span></span>
+          </label>
+        </div>
       </div>
     `;
     App.openModal(`${ar?'استلام شحنة':'Receive Stock'} — ${wh.code}`, body,
@@ -4665,6 +5283,7 @@ const Action = {
     const ref = document.getElementById('rcRef').value.trim();
     const supplierCode = document.getElementById('rcSupplier').value.trim();
     const notes = document.getElementById('rcNotes').value.trim();
+    const useCommittee = document.getElementById('rcCommittee')?.checked;
     const item = wh.items.find(i => i.sku === sku);
     if (!item) return;
     if (isNaN(qty) || qty <= 0) { toast(ar?'أدخل كمية موجبة':'Enter positive qty','error'); return; }
@@ -4673,14 +5292,25 @@ const Action = {
     if (!supplier && (State.data.suppliers||[]).length > 0) { toast(ar?'اختر مورّد':'Select supplier','error'); return; }
     const supplierLabel = supplier ? `${supplier.code} (${supplier.name})` : '';
 
-    item.qty += qty;
-    Movements.addStock({ whId, sku, type: 'receive', qty, ref, notes: supplierLabel ? `${supplierLabel} | ${notes}` : notes });
-    Audit.log('receive_stock', 'Warehouse', `${whId}/${sku}`, { qty, ref, supplier: supplierCode });
-    Movements.add('ok', `↓ ${ar?'استلام':'Receive'}: ${wh.code}/${sku} +${fmt.num(qty)} ${item.unit} (${ref})${supplier?` ← ${supplier.code}`:''}`, { whId, sku, qty });
-    State.save();
-    App.closeModal();
-    toast(ar?`✓ تم الاستلام: +${fmt.num(qty)} ${item.unit}`:`✓ Received: +${fmt.num(qty)} ${item.unit}`, 'success');
-    View.warehouses();
+    if (useCommittee) {
+      // Route through committee — DON'T add to stock yet
+      const committeeId = Action.startCommittee({ whId, sku, qty, supplierCode, shipmentRef: ref });
+      if (!committeeId) return; // failed (e.g., missing members)
+      State.save();
+      App.closeModal();
+      toast(ar?`✓ أُرسلت للجنة ${committeeId}`:`✓ Sent to committee ${committeeId}`, 'success');
+      App.goto('committee');
+    } else {
+      // Direct receive — add to stock immediately
+      item.qty += qty;
+      Movements.addStock({ whId, sku, type: 'receive', qty, ref, notes: supplierLabel ? `${supplierLabel} | ${notes}` : notes });
+      Audit.log('receive_stock', 'Warehouse', `${whId}/${sku}`, { qty, ref, supplier: supplierCode });
+      Movements.add('ok', `↓ ${ar?'استلام':'Receive'}: ${wh.code}/${sku} +${fmt.num(qty)} ${item.unit} (${ref})${supplier?` ← ${supplier.code}`:''}`, { whId, sku, qty });
+      State.save();
+      App.closeModal();
+      toast(ar?`✓ تم الاستلام: +${fmt.num(qty)} ${item.unit}`:`✓ Received: +${fmt.num(qty)} ${item.unit}`, 'success');
+      View.warehouses();
+    }
   },
 
   // Form: Issue stock (outgoing — to production or other warehouse)
