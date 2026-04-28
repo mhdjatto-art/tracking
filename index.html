@@ -1300,7 +1300,7 @@ const STAGES = [
   { id: 'AT_K2',            name: 'K2 — تغليف',          nameEn: 'K2 — Lamination',  dept: 'PROD', code: 'K2' },
   { id: 'AT_K3',            name: 'K3 — نقش وقطع',       nameEn: 'K3 — Embossing',   dept: 'PROD', code: 'K3' },
   { id: 'AT_K4',            name: 'K4 — تشخيص',          nameEn: 'K4 — Pre-Person',  dept: 'PROD', code: 'K4' },
-  { id: 'AT_BUFFER',        name: 'منطقة وسطية (Buffer)', nameEn: 'Buffer Zone',      dept: 'QC',   code: 'BUF' },
+  { id: 'AT_BUFFER',        name: 'IFA WH (منطقة الفحص)', nameEn: 'IFA WH (Inspection Buffer)', dept: 'QC',   code: 'IFA' },
   { id: 'AT_MOC',           name: 'MOC — فحص نهائي',     nameEn: 'MOC — Final QC',   dept: 'QC',   code: 'MOC' },
   { id: 'AT_PACKAGING',     name: 'التغليف',              nameEn: 'Packaging',        dept: 'QC',   code: 'PKG' },
   { id: 'AT_PMF',           name: 'مستودع PMF',           nameEn: 'PMF Warehouse',    dept: 'PMF',  code: 'PMF' },
@@ -2280,7 +2280,7 @@ const SEQ = {
     const wo = Q.wo(woId);
     if (!wo) return { ok: false, error: 'WO not found' };
     if (wo.currentStage !== 'AT_BUFFER' && wo.currentStage !== 'AT_MOC' && wo.currentStage !== 'AT_PACKAGING') {
-      return { ok: false, error: ar?'الـ WO ليس في منطقة الـ Buffer':'WO not at buffer stage' };
+      return { ok: false, error: ar?'الـ WO ليس في IFA WH':'WO not in IFA WH' };
     }
     qty = parseInt(qty);
     if (!qty || qty <= 0) return { ok: false, error: ar?'الكمية يجب أن تكون موجبة':'Qty must be positive' };
@@ -4273,13 +4273,13 @@ View.quality = function() {
     <div class="page-header">
       <div>
         <div class="page-title">${ar?'الجودة (MOC) و Sequences':'Quality (MOC) & Sequences'}</div>
-        <div class="page-sub">${ar?'إدارة الـ Buffer وفحص Sequences وتسليمها للتغليف':'Buffer management, sequence inspection, and packaging handover'}</div>
+        <div class="page-sub">${ar?'إدارة IFA WH وفحص Sequences وتسليمها للتغليف':'IFA WH management, sequence inspection, and packaging handover'}</div>
       </div>
     </div>
 
     <div class="kpi-grid">
       <div class="kpi" style="--accent:var(--violet);--accent-bg:rgba(167,139,250,0.1)">
-        <div class="kpi-label">${ar?'WOs في الـ Buffer':'WOs in Buffer'}</div>
+        <div class="kpi-label">${ar?'WOs في IFA WH':'WOs in IFA WH'}</div>
         <div class="kpi-value">${wosInFlow.length}</div>
       </div>
       <div class="kpi" style="--accent:var(--amber);--accent-bg:rgba(245,158,11,0.1)">
@@ -4302,12 +4302,12 @@ View.quality = function() {
 
     <!-- WOs in buffer/flow with sequence creation -->
     <div class="card mt-2">
-      <div class="card-title">📦 ${ar?'WOs في منطقة الـ Buffer':'WOs in Buffer Zone'} (${wosInFlow.length})</div>
-      ${wosInFlow.length === 0 ? `<div class="empty-state">${ar?'لا توجد WOs في الـ Buffer حالياً':'No WOs in buffer'}</div>` : `
+      <div class="card-title">📦 ${ar?'WOs في مستودع IFA':'WOs in IFA WH'} (${wosInFlow.length})</div>
+      ${wosInFlow.length === 0 ? `<div class="empty-state">${ar?'لا توجد WOs في IFA حالياً':'No WOs in IFA'}</div>` : `
         <div style="overflow-x:auto"><table class="data">
           <thead><tr>
             <th>WO</th>
-            <th>${ar?'كمية البفر':'Buffered Qty'}</th>
+            <th>${ar?'كمية IFA':'IFA Qty'}</th>
             <th>${ar?'مخصص':'Allocated'}</th>
             <th>${ar?'متبقي':'Remaining'}</th>
             <th>${ar?'Sequences':'Sequences'}</th>
@@ -6567,14 +6567,14 @@ const Action = {
     const wo = Q.wo(woId);
     if (!wo) return;
     const remaining = SEQ.remainingBufferQty(woId);
-    if (remaining <= 0) { toast(ar?'لا توجد وحدات متبقية في الـ buffer':'No buffer remaining','error'); return; }
+    if (remaining <= 0) { toast(ar?'لا توجد وحدات متبقية في IFA':'No IFA stock remaining','error'); return; }
     const defaultBatch = Math.min(State.data.seqDefaults?.batchSize || 1000, remaining);
     const nextStart = SEQ.nextStartSerial(woId);
 
     const body = `
       <div style="background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.25);border-radius:9px;padding:12px;margin-bottom:14px;font-size:11.5px">
         📦 <b style="color:var(--violet)">${ar?'إنشاء سيكوينس جديد':'Create New Sequence'}</b>
-        <div style="margin-top:6px;color:var(--text-2)">${ar?'WO:':'WO:'} <b>${woId}</b> · ${ar?'متبقي في الـ buffer:':'Remaining in buffer:'} <b class="mono">${fmt.num(remaining)}</b></div>
+        <div style="margin-top:6px;color:var(--text-2)">${ar?'WO:':'WO:'} <b>${woId}</b> · ${ar?'متبقي في IFA:':'Remaining in IFA:'} <b class="mono">${fmt.num(remaining)}</b></div>
       </div>
       <div class="form-grid">
         <div class="form-row">
@@ -6624,7 +6624,7 @@ const Action = {
         <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px">
           <span class="text-mute">WO:</span><b class="mono">${woId}</b>
           <span class="text-mute">${ar?'الكمية الأصلية:':'Original qty:'}</span><b class="mono">${fmt.num(wo.qty)}</b>
-          <span class="text-mute">${ar?'كمية الـ Buffer:':'Buffered:'}</span><b class="mono">${fmt.num(wo.bufferedQty || 0)}</b>
+          <span class="text-mute">${ar?'كمية IFA:':'IFA Qty:'}</span><b class="mono">${fmt.num(wo.bufferedQty || 0)}</b>
           <span class="text-mute">${ar?'مخصص:':'Allocated:'}</span><b class="mono">${fmt.num(allocated)}</b>
           <span class="text-mute">${ar?'متبقي:':'Remaining:'}</span><b class="mono">${fmt.num(remaining)}</b>
         </div>
