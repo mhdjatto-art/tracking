@@ -1248,7 +1248,19 @@ const Movements = {
   },
   addStock({ whId, sku, type, qty, ref, notes }) {
     if (!State.data.stockMovements) State.data.stockMovements = [];
-    const signedQty = (type === 'issue') ? -Math.abs(qty) : qty;
+    // Sign convention:
+    // - issue / scrap_loss: negative (material leaves stock)
+    // - receive / recovery / opening / adjust+: positive
+    // - adjust can be either; we keep the caller-provided sign for adjust
+    const negTypes = ['issue', 'scrap_loss'];
+    let signedQty;
+    if (negTypes.includes(type)) {
+      signedQty = -Math.abs(qty);
+    } else if (type === 'adjust') {
+      signedQty = qty; // caller controls sign
+    } else {
+      signedQty = Math.abs(qty);
+    }
     const mv = {
       id: uid('SM'), ts: now(),
       whId, sku, type,
@@ -1898,6 +1910,43 @@ const Repo = {
   },
 
   // ═══════════════════════════════════════════════════════════════════
+  // SCRAP LOG — Phase 2.3: immutable audit of scrap events with material recovery
+  // ═══════════════════════════════════════════════════════════════════
+  scrapLog: {
+    async list(limit = 1000) {
+      if (!sb) return null;
+      const { data, error } = await sb.from('scrap_log').select('*').order('created_at', { ascending: false }).limit(limit);
+      if (error) { Repo._err('scrapLog.list', error); return null; }
+      Repo._ok('scrapLog.list');
+      return (data || []).map(r => ({
+        id: r.id, woId: r.wo_id, stationId: r.station_id,
+        scrapQty: r.scrap_qty, sequenceId: r.sequence_id,
+        reason: r.reason || '',
+        materials: r.materials || [],
+        totalRecovered: r.total_recovered || 0,
+        totalLost: r.total_lost || 0,
+        ts: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
+        by: r.by_user,
+      }));
+    },
+    async insert(entry) {
+      if (!sb) return false;
+      const { error } = await sb.from('scrap_log').insert({
+        id: entry.id, wo_id: entry.woId, station_id: entry.stationId,
+        scrap_qty: entry.scrapQty, sequence_id: entry.sequenceId || null,
+        reason: entry.reason || null,
+        materials: entry.materials || [],
+        total_recovered: entry.totalRecovered || 0,
+        total_lost: entry.totalLost || 0,
+        by_user: entry.by || State.user?.id,
+      });
+      if (error) { Repo._err('scrapLog.insert', error); return false; }
+      Repo._ok('scrapLog.insert');
+      return true;
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
   // BOOTSTRAP — load all cloud data into State.data on login
   // Called from the auth flow after successful login.
   // ═══════════════════════════════════════════════════════════════════
@@ -1910,7 +1959,7 @@ const Repo = {
     const t0 = Date.now();
 
     try {
-      const [suppliers, maintenance, ccfg, cmembers, creviews, returns, stkMvs, bomMap, stConsume, seqs] = await Promise.all([
+      const [suppliers, maintenance, ccfg, cmembers, creviews, returns, stkMvs, bomMap, stConsume, seqs, scrapLog] = await Promise.all([
         this.suppliers.list(),
         this.maintenance.list(),
         this.committee.getConfig(),
@@ -1921,6 +1970,7 @@ const Repo = {
         this.bom.list(),
         this.stationConsumption.list(1000),
         this.sequences.list(),
+        this.scrapLog.list(1000),
       ]);
 
       if (suppliers !== null) State.data.suppliers = suppliers;
@@ -1941,6 +1991,7 @@ const Repo = {
       if (bomMap !== null && Object.keys(bomMap).length > 0) State.data.bom = bomMap;
       if (stConsume !== null) State.data.stationConsumption = stConsume;
       if (seqs !== null) State.data.sequences = seqs;
+      if (scrapLog !== null) State.data.scrapLog = scrapLog;
 
       State.save();
       console.log(`[Repo] Bootstrap complete in ${Date.now() - t0}ms — `, {
@@ -1950,6 +2001,7 @@ const Repo = {
         bomStations: bomMap ? Object.keys(bomMap).length : 0,
         stationConsumption: stConsume?.length,
         sequences: seqs?.length,
+        scrapLog: scrapLog?.length,
       });
       return true;
     } catch (e) {
@@ -2305,11 +2357,15 @@ const SEQ = {
     seq.mocAt = now();
     seq.status = passed > 0 ? 'passed' : 'failed';
 
-    // Update WO totals
-    const wo = Q.wo(seq.woId);
-    if (wo) {
-      wo.scrap = (wo.scrap || 0) + failed;  // MOC failures count as scrap
-      wo.totalMOCScrap = (wo.totalMOCScrap || 0) + failed;
+    // Apply MOC scrap with full material accounting (across K1-K4 BOMs)
+    if (failed > 0) {
+      Scrap.applyMOCScrap(seq.woId, failed, {
+        reason: notes || `MOC failure on ${seqId}`,
+        sequenceId: seqId,
+      });
+      // Track on WO for quick access (Scrap.applyMOCScrap already added to wo.scrap)
+      const wo = Q.wo(seq.woId);
+      if (wo) wo.totalMOCScrap = (wo.totalMOCScrap || 0) + failed;
     }
 
     Audit.log('seq_moc_complete', 'Sequence', seqId, { passed, failed, status: seq.status });
@@ -2405,6 +2461,287 @@ const SEQ = {
   },
 };
 
+/* ============ SCRAP ENGINE — Re-Cancellation with Material Recovery ============ */
+// Handles scrap recording at any station with proper material accounting:
+// - Calculates what materials were consumed for the scrapped units
+// - Recoverable materials (e.g. gold) get returned to stock at recoveryRate
+// - Non-recoverable materials are logged as scrap_loss
+// - Maintains scrap_log audit trail per WO/station
+//
+// Math:
+//   For each material in BOM[stationId]:
+//     consumedForScrap = qtyPerUnit × scrapQty
+//     if recoverable:
+//       recovered = consumedForScrap × recoveryRate
+//       lost      = consumedForScrap − recovered
+//     else:
+//       recovered = 0
+//       lost      = consumedForScrap
+
+const Scrap = {
+  // Calculate the impact of scrapping `scrapQty` units at `stationId` for `woId`
+  // Returns: { ok, materials: [{ sku, name, consumed, recovered, lost, recoverable, whId, unit }], totals: { recovered, lost } }
+  // Does NOT mutate anything — pure calculation for preview/UI
+  calculate(woId, stationId, scrapQty) {
+    const wo = Q.wo(woId);
+    if (!wo) return { ok: false, error: 'WO not found' };
+    scrapQty = +scrapQty;
+    if (!scrapQty || scrapQty <= 0) return { ok: false, error: 'Scrap qty must be positive' };
+
+    const recipe = BOM.forStation(stationId);
+    if (recipe.length === 0) {
+      // No BOM → no material accounting (scrap is just qty tracking)
+      return { ok: true, materials: [], totals: { recovered: 0, lost: 0 }, noBom: true };
+    }
+
+    const materials = recipe.map(m => {
+      const consumed = +(m.qtyPerUnit * scrapQty).toFixed(4);
+      let recovered = 0;
+      let lost = consumed;
+      if (m.recoverable) {
+        const rate = +(m.recoveryRate || 0);
+        recovered = +(consumed * rate).toFixed(4);
+        lost = +(consumed - recovered).toFixed(4);
+      }
+      return {
+        sku: m.sku,
+        name: m.name,
+        nameEn: m.nameEn,
+        whId: m.whId,
+        unit: m.unit,
+        recoverable: !!m.recoverable,
+        recoveryRate: m.recoveryRate || 0,
+        qtyPerUnit: m.qtyPerUnit,
+        consumed, recovered, lost,
+      };
+    });
+
+    return {
+      ok: true,
+      materials,
+      totals: {
+        recovered: materials.reduce((s, m) => s + m.recovered, 0),
+        lost: materials.reduce((s, m) => s + m.lost, 0),
+      }
+    };
+  },
+
+  // Apply scrap with material accounting:
+  //   1. Add scrapQty to wo.scrap
+  //   2. For each BOM material: log recovery + loss to stock_movements
+  //   3. Return recoverable materials to warehouse stock
+  //   4. Log to scrap_log for audit
+  // opts: { reason, sequenceId? (for MOC scrap) }
+  // Returns: { ok, log, materials, totals }
+  apply(woId, stationId, scrapQty, opts = {}) {
+    const ar = State.lang === 'ar';
+    const wo = Q.wo(woId);
+    if (!wo) return { ok: false, error: 'WO not found' };
+
+    const calc = this.calculate(woId, stationId, scrapQty);
+    if (!calc.ok) return calc;
+
+    // Update WO scrap counter
+    wo.scrap = (wo.scrap || 0) + scrapQty;
+    wo.totalRecovered = +((wo.totalRecovered || 0) + calc.totals.recovered).toFixed(4);
+    wo.totalScrapLoss = +((wo.totalScrapLoss || 0) + calc.totals.lost).toFixed(4);
+
+    // Process each material — return recoverable to warehouse + log movements
+    for (const m of calc.materials) {
+      const wh = Q.wh(m.whId);
+      if (!wh) continue;
+      const item = wh.items.find(i => i.sku === m.sku);
+
+      // Recovery: return to warehouse
+      if (m.recovered > 0 && item) {
+        const before = item.qty;
+        item.qty = +(item.qty + m.recovered).toFixed(4);
+        Movements.addStock({
+          whId: m.whId, sku: m.sku, type: 'recovery', qty: m.recovered,
+          ref: `${woId}/${stationId}/scrap`,
+          notes: ar
+            ? `استرداد ${fmt.num(m.recovered)} ${m.unit} من scrap في ${stationId} (${fmt.num((m.recoveryRate||0)*100)}%)`
+            : `Recovered ${fmt.num(m.recovered)} ${m.unit} from scrap at ${stationId} (${fmt.num((m.recoveryRate||0)*100)}%)`,
+        });
+      }
+
+      // Loss: log as scrap_loss (no warehouse change — already deducted at consume time)
+      if (m.lost > 0) {
+        Movements.addStock({
+          whId: m.whId, sku: m.sku, type: 'scrap_loss', qty: m.lost,
+          ref: `${woId}/${stationId}/scrap`,
+          notes: ar
+            ? `فقد بسبب scrap في ${stationId}: ${scrapQty} ${ar?'وحدة':'unit'}`
+            : `Lost due to scrap at ${stationId}: ${scrapQty} units`,
+        });
+      }
+    }
+
+    // Log scrap entry
+    if (!State.data.scrapLog) State.data.scrapLog = [];
+    const log = {
+      id: 'SCR-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+      woId, stationId, scrapQty,
+      sequenceId: opts.sequenceId || null,
+      reason: opts.reason || '',
+      materials: calc.materials.map(m => ({
+        sku: m.sku, consumed: m.consumed, recovered: m.recovered, lost: m.lost,
+        recoverable: m.recoverable, recoveryRate: m.recoveryRate, unit: m.unit,
+      })),
+      totalRecovered: calc.totals.recovered,
+      totalLost: calc.totals.lost,
+      ts: now(),
+      by: State.user?.id,
+    };
+    State.data.scrapLog.push(log);
+
+    Audit.log('scrap_apply', 'WorkOrder', woId, {
+      stationId, scrapQty,
+      recovered: calc.totals.recovered, lost: calc.totals.lost
+    });
+
+    Movements.add(
+      calc.totals.recovered > 0 ? 'warn' : 'error',
+      `🔻 ${ar?'Scrap في':'Scrap at'} ${stationId}: ${woId} — ${fmt.num(scrapQty)} ${ar?'وحدة':'units'}` +
+      (calc.totals.recovered > 0 ? ` · ${ar?'مُسترد:':'recovered:'} ${fmt.num(calc.totals.recovered)}` : ''),
+      { woId, stationId, scrapQty }
+    );
+
+    State.save();
+
+    // Cloud sync
+    if (typeof Repo !== 'undefined' && Repo.scrapLog) {
+      Repo.scrapLog.insert(log).catch(e => console.error('[Scrap apply sync]', e));
+    }
+
+    return { ok: true, log, materials: calc.materials, totals: calc.totals };
+  },
+
+  // Get scrap log entries for a WO
+  forWO(woId) {
+    return (State.data.scrapLog || []).filter(s => s.woId === woId).sort((a,b) => a.ts - b.ts);
+  },
+
+  // Total scrapped qty for WO (sum across all stations)
+  totalScrap(woId) {
+    return this.forWO(woId).reduce((sum, s) => sum + (s.scrapQty || 0), 0);
+  },
+
+  // Scrap breakdown by station
+  byStation(woId) {
+    const result = {};
+    for (const log of this.forWO(woId)) {
+      if (!result[log.stationId]) result[log.stationId] = { qty: 0, recovered: 0, lost: 0 };
+      result[log.stationId].qty += log.scrapQty;
+      result[log.stationId].recovered += log.totalRecovered;
+      result[log.stationId].lost += log.totalLost;
+    }
+    return result;
+  },
+
+  // Apply scrap discovered at MOC — these units passed through ALL stations (K1-K4),
+  // so materials from every station with a BOM are accounted for.
+  // This is different from per-station scrap (which only counts that station's BOM).
+  // opts: { reason, sequenceId }
+  // Returns: { ok, log, materials, totals }
+  applyMOCScrap(woId, scrapQty, opts = {}) {
+    const ar = State.lang === 'ar';
+    const wo = Q.wo(woId);
+    if (!wo) return { ok: false, error: 'WO not found' };
+    scrapQty = +scrapQty;
+    if (!scrapQty || scrapQty <= 0) return { ok: false, error: 'Scrap qty must be positive' };
+
+    // Aggregate materials across all production stations (K1, K2, K3, K4)
+    // For each station, calculate per-material consumed/recovered/lost
+    const stations = ['K1', 'K2', 'K3', 'K4'];
+    const allMaterials = [];
+    for (const stId of stations) {
+      const calc = this.calculate(woId, stId, scrapQty);
+      if (!calc.ok || calc.noBom) continue;
+      for (const m of calc.materials) {
+        allMaterials.push({ ...m, fromStation: stId });
+      }
+    }
+
+    if (allMaterials.length === 0) {
+      // No BOMs at all — fall back to plain scrap counting
+      wo.scrap = (wo.scrap || 0) + scrapQty;
+      State.save();
+      return { ok: true, log: null, materials: [], totals: { recovered: 0, lost: 0 }, noBom: true };
+    }
+
+    // Apply each material the same way Scrap.apply does
+    let totalRecovered = 0;
+    let totalLost = 0;
+    for (const m of allMaterials) {
+      const wh = Q.wh(m.whId);
+      if (!wh) continue;
+      const item = wh.items.find(i => i.sku === m.sku);
+
+      if (m.recovered > 0 && item) {
+        item.qty = +(item.qty + m.recovered).toFixed(4);
+        Movements.addStock({
+          whId: m.whId, sku: m.sku, type: 'recovery', qty: m.recovered,
+          ref: `${woId}/MOC/${m.fromStation}/scrap`,
+          notes: ar
+            ? `استرداد من scrap MOC (مستهلك في ${m.fromStation}, ${fmt.num((m.recoveryRate||0)*100)}%)`
+            : `Recovered from MOC scrap (consumed at ${m.fromStation}, ${fmt.num((m.recoveryRate||0)*100)}%)`,
+        });
+        totalRecovered += m.recovered;
+      }
+      if (m.lost > 0) {
+        Movements.addStock({
+          whId: m.whId, sku: m.sku, type: 'scrap_loss', qty: m.lost,
+          ref: `${woId}/MOC/${m.fromStation}/scrap`,
+          notes: ar
+            ? `فقد بسبب scrap في MOC (مستهلك في ${m.fromStation})`
+            : `Lost due to MOC scrap (consumed at ${m.fromStation})`,
+        });
+        totalLost += m.lost;
+      }
+    }
+
+    totalRecovered = +totalRecovered.toFixed(4);
+    totalLost = +totalLost.toFixed(4);
+
+    // Update WO
+    wo.scrap = (wo.scrap || 0) + scrapQty;
+    wo.totalRecovered = +((wo.totalRecovered || 0) + totalRecovered).toFixed(4);
+    wo.totalScrapLoss = +((wo.totalScrapLoss || 0) + totalLost).toFixed(4);
+
+    // Log
+    if (!State.data.scrapLog) State.data.scrapLog = [];
+    const log = {
+      id: 'SCR-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+      woId, stationId: 'MOC', scrapQty,
+      sequenceId: opts.sequenceId || null,
+      reason: opts.reason || '',
+      // Group materials by station for clarity in the audit
+      materials: allMaterials.map(m => ({
+        sku: m.sku, fromStation: m.fromStation,
+        consumed: m.consumed, recovered: m.recovered, lost: m.lost,
+        recoverable: m.recoverable, recoveryRate: m.recoveryRate, unit: m.unit,
+      })),
+      totalRecovered, totalLost,
+      ts: now(), by: State.user?.id,
+    };
+    State.data.scrapLog.push(log);
+
+    Audit.log('scrap_moc', 'WorkOrder', woId, { scrapQty, recovered: totalRecovered, lost: totalLost });
+    Movements.add('warn',
+      `🔻 ${ar?'Scrap من MOC':'MOC scrap'}: ${woId} — ${fmt.num(scrapQty)} ${ar?'وحدة':'units'}` +
+      (totalRecovered > 0 ? ` · ${ar?'مُسترد:':'recovered:'} ${fmt.num(totalRecovered)}` : ''),
+      { woId, stationId: 'MOC', scrapQty }
+    );
+
+    State.save();
+    if (typeof Repo !== 'undefined' && Repo.scrapLog) {
+      Repo.scrapLog.insert(log).catch(e => console.error('[Scrap MOC sync]', e));
+    }
+    return { ok: true, log, materials: allMaterials, totals: { recovered: totalRecovered, lost: totalLost } };
+  },
+};
+
 /* ============ WORKFLOW ENGINE ============ */
 const WF = {
   // Move WO to next stage with full audit
@@ -2477,7 +2814,19 @@ const WF = {
     });
     wo.currentStage = next;
     wo.currentOwner = toUser;
-    if (opts.scrap) wo.scrap = (wo.scrap || 0) + scrap;
+    // Scrap accounting via Scrap engine — calculates material loss + recovery
+    if (opts.scrap && opts.scrap > 0) {
+      // Determine the "from" station (where the scrap happened)
+      // Use previous stage if it was a station (AT_K1..K4), otherwise just track qty
+      const prevStage = wo.history[wo.history.length-2]?.stage;
+      const stationFromStage = prevStage && prevStage.startsWith('AT_K') ? prevStage.replace('AT_', '') : null;
+      if (stationFromStage && BOM.forStation(stationFromStage).length > 0) {
+        Scrap.apply(woId, stationFromStage, scrap, { reason: opts.notes || 'advance with scrap' });
+      } else {
+        // No BOM for this station — just count scrap qty without material accounting
+        wo.scrap = (wo.scrap || 0) + scrap;
+      }
+    }
     if (opts.qty != null) wo.produced = opts.qty;
 
     Audit.log('advance_wo', 'WorkOrder', woId, { from: stageById(wo.history[wo.history.length-2]?.stage)?.id, to: next, qty, scrap });
@@ -4936,14 +5285,58 @@ const Action = {
           </div>
         `;
       })()}
+      ${(() => {
+        const scrapEntries = Scrap.forWO(woId);
+        if (scrapEntries.length === 0) return '';
+        const totalRecovered = scrapEntries.reduce((s, e) => s + (e.totalRecovered || 0), 0);
+        const totalLost = scrapEntries.reduce((s, e) => s + (e.totalLost || 0), 0);
+        return `
+          <div class="card-title" style="margin-top:14px;margin-bottom:8px">🔻 ${ar?'سجل Scrap':'Scrap Log'} (${scrapEntries.length})</div>
+          <div style="background:var(--glass);border-radius:8px;padding:10px;font-size:11.5px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px dashed var(--border)">
+              <div><span class="text-mute">${ar?'إجمالي مُسترد:':'Total recovered:'}</span> <b class="mono" style="color:var(--emerald)">${fmt.num(totalRecovered)}</b></div>
+              <div><span class="text-mute">${ar?'إجمالي فقد:':'Total lost:'}</span> <b class="mono" style="color:var(--rose)">${fmt.num(totalLost)}</b></div>
+            </div>
+            ${scrapEntries.map(e => {
+              const u = e.by ? Q.user(e.by) : null;
+              return `
+                <div style="margin-bottom:8px;padding-bottom:6px;border-bottom:1px dashed var(--border)">
+                  <div style="display:flex;justify-content:space-between;align-items:center">
+                    <div><b style="color:var(--rose)">${e.stationId}</b> · ${fmt.num(e.scrapQty)} ${ar?'وحدة':'units'}</div>
+                    <div class="text-mute mono" style="font-size:10.5px">${fmt.ago(e.ts)}</div>
+                  </div>
+                  ${e.reason ? `<div class="text-mute" style="font-style:italic;font-size:11px;margin-top:2px">"${escapeHTML(e.reason)}"</div>` : ''}
+                  ${e.materials && e.materials.length > 0 ? `
+                    <div style="margin-top:4px;font-size:10.5px">
+                      ${e.materials.map(m => `
+                        <span class="mono" style="margin-${ar?'left':'right'}:8px">
+                          ${m.sku}${m.fromStation ? ' (' + m.fromStation + ')' : ''}:
+                          ${m.recovered > 0 ? `<span style="color:var(--emerald)">+${fmt.num(m.recovered)}</span> ` : ''}
+                          <span style="color:var(--rose)">−${fmt.num(m.lost)}</span> ${m.unit}
+                        </span>
+                      `).join('')}
+                    </div>
+                  ` : ''}
+                  ${u ? `<div class="text-mute" style="font-size:10.5px;margin-top:2px">${ar?'بواسطة:':'by:'} ${escapeHTML(ar?u.name:u.nameEn)}</div>` : ''}
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `;
+      })()}
     `;
 
     const canReturn = (wo.currentStage === 'AT_GDN' || wo.currentStage === 'DELIVERED') &&
                       (State.user.dept === 'GDN' || State.user.dept === 'PMF' || Perm.isManager());
 
+    // Can report scrap if at a K-station and user is PROD/MGMT
+    const atKStation = wo.currentStage?.startsWith('AT_K');
+    const canReportScrap = atKStation && (State.user.dept === 'PROD' || Perm.isManager());
+
     const footer = `
       <button class="btn btn-secondary" onclick="App.closeModal()">${t('close')}</button>
       <button class="btn btn-secondary" onclick="App.closeModal();App.goto('trace');setTimeout(()=>{document.getElementById('traceQuery').value='${woId}';View.runTrace()},50)">${ar?'فتح في التتبع':'Open in Trace'}</button>
+      ${canReportScrap ? `<button class="btn btn-secondary" onclick="App.closeModal();Action.reportScrap('${woId}','${wo.currentStage.replace('AT_','')}')" style="color:var(--rose)">🔻 ${ar?'تسجيل Scrap':'Scrap'}</button>` : ''}
       ${canReturn ? `<button class="btn btn-secondary" onclick="App.closeModal();Action.initiateReturn('${woId}')" style="color:var(--rose)">${ar?'↩ إرجاع':'↩ Return'}</button>` : ''}
       ${action && canAct ? `<button class="btn btn-primary" onclick="App.closeModal();${action.handler}">${escapeHTML(action.label)}</button>` : (action?`<span class="text-mute" style="font-size:11px;align-self:center">${t('no_perm')}</span>`:'')}
     `;
@@ -6071,6 +6464,100 @@ const Action = {
       el.textContent = sum;
       el.style.color = sum === expectedTotal ? 'var(--emerald)' : 'var(--rose)';
     }
+  },
+
+  // ─────── SCRAP REPORTING ───────
+
+  // Open scrap reporting dialog for a WO at a specific station
+  reportScrap(woId, stationId) {
+    const ar = State.lang === 'ar';
+    if (!Perm.canAct('PROD') && !Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
+    const wo = Q.wo(woId);
+    if (!wo) return;
+    const station = stationId || (wo.currentStage?.startsWith('AT_K') ? wo.currentStage.replace('AT_', '') : null);
+    if (!station) { toast(ar?'لا توجد محطة محددة':'No station identified','error'); return; }
+
+    const recipe = BOM.forStation(station);
+    const hasRecipe = recipe.length > 0;
+
+    const body = `
+      <div style="background:rgba(244,63,94,0.06);border:1px solid rgba(244,63,94,0.25);border-radius:9px;padding:12px;margin-bottom:14px;font-size:11.5px">
+        🔻 <b style="color:var(--rose)">${ar?'تسجيل Scrap':'Report Scrap'}</b>
+        <div style="margin-top:6px;color:var(--text-2)">${ar?'WO:':'WO:'} <b>${woId}</b> · ${ar?'المحطة:':'Station:'} <b>${station}</b></div>
+        ${hasRecipe ? '' : `<div style="margin-top:6px;color:var(--amber)">⚠ ${ar?'هذه المحطة بدون BOM — لن يُحسب فقد المواد':'This station has no BOM — material loss not calculated'}</div>`}
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label>${ar?'عدد الوحدات التالفة':'Scrapped Units'} <span class="req">*</span></label>
+          <input id="scrapQty" type="number" min="1" value="1" oninput="Action._previewScrap('${woId}','${station}')">
+        </div>
+        <div class="field">
+          <label>${ar?'السبب (اختياري)':'Reason (optional)'}</label>
+          <textarea id="scrapReason" rows="2" placeholder="${ar?'مثلاً: عيب طباعة، تلف ميكانيكي':'e.g. print defect, mechanical damage'}"></textarea>
+        </div>
+        <div id="scrapPreview" style="background:var(--glass);border-radius:8px;padding:10px;font-size:11.5px"></div>
+      </div>
+    `;
+    App.openModal(`${ar?'تسجيل Scrap':'Report Scrap'} — ${station}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.saveReportScrap('${woId}','${station}')" style="background:var(--rose);border-color:var(--rose)">${ar?'تأكيد Scrap':'Confirm Scrap'}</button>`, true);
+    // Initial preview
+    setTimeout(() => Action._previewScrap(woId, station), 30);
+  },
+
+  // Live preview of scrap impact (recovery + loss)
+  _previewScrap(woId, stationId) {
+    const ar = State.lang === 'ar';
+    const qty = parseInt(document.getElementById('scrapQty')?.value) || 0;
+    const el = document.getElementById('scrapPreview');
+    if (!el) return;
+    if (qty <= 0) { el.innerHTML = ''; return; }
+    const calc = Scrap.calculate(woId, stationId, qty);
+    if (!calc.ok) { el.innerHTML = `<span style="color:var(--rose)">${calc.error}</span>`; return; }
+    if (calc.noBom || calc.materials.length === 0) {
+      el.innerHTML = `<span class="text-mute">${ar?'لا يوجد BOM لهذه المحطة — سيُسجَّل scrap كمياً فقط':'No BOM for this station — scrap recorded as qty only'}</span>`;
+      return;
+    }
+    el.innerHTML = `
+      <div style="font-weight:600;margin-bottom:6px">${ar?'تأثير Scrap على المواد:':'Material impact:'}</div>
+      <table class="data" style="width:100%;font-size:11px">
+        <thead><tr>
+          <th>${ar?'المادة':'Material'}</th>
+          <th>${ar?'مُستهلك':'Consumed'}</th>
+          <th>${ar?'مُسترد':'Recovered'}</th>
+          <th>${ar?'فقد':'Lost'}</th>
+        </tr></thead>
+        <tbody>${calc.materials.map(m => `
+          <tr>
+            <td class="mono">${m.sku}</td>
+            <td class="mono">${fmt.num(m.consumed)} ${m.unit}</td>
+            <td class="mono" style="color:var(--emerald)">${m.recovered > 0 ? '+' + fmt.num(m.recovered) + ' ' + m.unit : '—'}</td>
+            <td class="mono" style="color:var(--rose)">${fmt.num(m.lost)} ${m.unit}</td>
+          </tr>
+        `).join('')}</tbody>
+        <tfoot><tr style="border-top:2px solid var(--border)">
+          <td colspan="2"><b>${ar?'الإجمالي':'Total'}</b></td>
+          <td class="mono" style="color:var(--emerald)"><b>+${fmt.num(calc.totals.recovered)}</b></td>
+          <td class="mono" style="color:var(--rose)"><b>${fmt.num(calc.totals.lost)}</b></td>
+        </tr></tfoot>
+      </table>
+    `;
+  },
+
+  saveReportScrap(woId, stationId) {
+    const ar = State.lang === 'ar';
+    const qty = parseInt(document.getElementById('scrapQty').value);
+    const reason = document.getElementById('scrapReason').value.trim();
+    if (!qty || qty <= 0) { toast(ar?'الكمية يجب أن تكون موجبة':'Qty must be positive', 'error'); return; }
+    const result = Scrap.apply(woId, stationId, qty, { reason });
+    if (!result.ok) { toast(result.error, 'error'); return; }
+    App.closeModal();
+    toast(ar
+      ? `✓ تم تسجيل ${qty} scrap` + (result.totals.recovered > 0 ? ` · مُسترد: ${fmt.num(result.totals.recovered)}` : '')
+      : `✓ Scrapped ${qty}` + (result.totals.recovered > 0 ? ` · recovered: ${fmt.num(result.totals.recovered)}` : ''),
+      'success');
+    // Refresh current view
+    if (typeof View[State.view] === 'function') View[State.view]();
   },
 
   // Create a new sequence on a WO sitting in buffer
