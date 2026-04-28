@@ -1288,7 +1288,9 @@ const STAGES = [
   { id: 'AT_K2',            name: 'K2 — تغليف',          nameEn: 'K2 — Lamination',  dept: 'PROD', code: 'K2' },
   { id: 'AT_K3',            name: 'K3 — نقش وقطع',       nameEn: 'K3 — Embossing',   dept: 'PROD', code: 'K3' },
   { id: 'AT_K4',            name: 'K4 — تشخيص',          nameEn: 'K4 — Pre-Person',  dept: 'PROD', code: 'K4' },
+  { id: 'AT_BUFFER',        name: 'منطقة وسطية (Buffer)', nameEn: 'Buffer Zone',      dept: 'QC',   code: 'BUF' },
   { id: 'AT_MOC',           name: 'MOC — فحص نهائي',     nameEn: 'MOC — Final QC',   dept: 'QC',   code: 'MOC' },
+  { id: 'AT_PACKAGING',     name: 'التغليف',              nameEn: 'Packaging',        dept: 'QC',   code: 'PKG' },
   { id: 'AT_PMF',           name: 'مستودع PMF',           nameEn: 'PMF Warehouse',    dept: 'PMF',  code: 'PMF' },
   { id: 'AT_GDN',           name: 'مستودع GDN',           nameEn: 'GDN Warehouse',    dept: 'GDN',  code: 'GDN' },
   { id: 'AT_COMMITTEE',     name: 'لجنة القبول',          nameEn: 'Acceptance Committee', dept: 'MGMT', code: 'ACC' },
@@ -1297,7 +1299,7 @@ const STAGES = [
   { id: 'RETURNED',         name: 'مرتجع للفحص',          nameEn: 'Returned for Review', dept: 'PMF', code: 'RET' },
 ];
 
-const STAGE_ORDER = ['CREATED','MAT_REQUEST','MAT_ISSUED','AT_K1','AT_K2','AT_K3','AT_K4','AT_MOC','AT_PMF','AT_GDN','AT_COMMITTEE','DELIVERED'];
+const STAGE_ORDER = ['CREATED','MAT_REQUEST','MAT_ISSUED','AT_K1','AT_K2','AT_K3','AT_K4','AT_BUFFER','AT_MOC','AT_PACKAGING','AT_PMF','AT_GDN','AT_COMMITTEE','DELIVERED'];
 const stageById = (id) => {
   const base = STAGES.find(s => s.id === id);
   if (!base) return null;
@@ -1426,6 +1428,15 @@ const Seed = {
       // Track material consumption per WO per station (audit + scrap calc)
       // Each entry: { woId, stationId, sku, qtyConsumed, ts, by }
       stationConsumption: [],
+      // Phase 2.2: MOC Sequences — batches that flow K4→Buffer→MOC→Packaging
+      // Each: { id, woId, startSerial, endSerial, qty, status, mocPassed, mocFailed,
+      //         packagingStatus, packagedQty, createdAt, mocBy, mocAt, packagedBy, packagedAt }
+      sequences: [],
+      // Phase 2.2: Default batch size for new sequences (configurable from settings)
+      seqDefaults: {
+        batchSize: 1000,
+        baseSerial: 1001,
+      },
       committee: {
         members: [],
         requiredApprovals: 3,
@@ -1840,6 +1851,53 @@ const Repo = {
   },
 
   // ═══════════════════════════════════════════════════════════════════
+  // SEQUENCES — MOC batches (Phase 2.2)
+  // ═══════════════════════════════════════════════════════════════════
+  sequences: {
+    async list() {
+      if (!sb) return null;
+      const { data, error } = await sb.from('sequences').select('*').order('start_serial');
+      if (error) { Repo._err('sequences.list', error); return null; }
+      Repo._ok('sequences.list');
+      const toMs = (s) => s ? new Date(s).getTime() : null;
+      return (data || []).map(r => ({
+        id: r.id, woId: r.wo_id, qty: r.qty,
+        startSerial: r.start_serial, endSerial: r.end_serial,
+        status: r.status, mocPassed: r.moc_passed || 0, mocFailed: r.moc_failed || 0,
+        mocBy: r.moc_by, mocAt: toMs(r.moc_at), mocStartedAt: toMs(r.moc_started_at),
+        mocNotes: r.moc_notes,
+        packagingStatus: r.packaging_status || 'waiting',
+        packagedQty: r.packaged_qty || 0,
+        packagedBy: r.packaged_by, packagedAt: toMs(r.packaged_at),
+        packagingStartedAt: toMs(r.packaging_started_at),
+        createdBy: r.created_by, createdAt: toMs(r.created_at) || Date.now(),
+      }));
+    },
+    async upsert(seq) {
+      if (!sb) return false;
+      const toIso = (ms) => ms ? new Date(ms).toISOString() : null;
+      const { error } = await sb.from('sequences').upsert({
+        id: seq.id, wo_id: seq.woId, qty: seq.qty,
+        start_serial: seq.startSerial, end_serial: seq.endSerial,
+        status: seq.status, moc_passed: seq.mocPassed || 0, moc_failed: seq.mocFailed || 0,
+        moc_by: seq.mocBy || null,
+        moc_at: toIso(seq.mocAt),
+        moc_started_at: toIso(seq.mocStartedAt),
+        moc_notes: seq.mocNotes || null,
+        packaging_status: seq.packagingStatus || 'waiting',
+        packaged_qty: seq.packagedQty || 0,
+        packaged_by: seq.packagedBy || null,
+        packaged_at: toIso(seq.packagedAt),
+        packaging_started_at: toIso(seq.packagingStartedAt),
+        created_by: seq.createdBy || null,
+      }, { onConflict: 'id' });
+      if (error) { Repo._err('sequences.upsert', error); return false; }
+      Repo._ok('sequences.upsert');
+      return true;
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
   // BOOTSTRAP — load all cloud data into State.data on login
   // Called from the auth flow after successful login.
   // ═══════════════════════════════════════════════════════════════════
@@ -1852,7 +1910,7 @@ const Repo = {
     const t0 = Date.now();
 
     try {
-      const [suppliers, maintenance, ccfg, cmembers, creviews, returns, stkMvs, bomMap, stConsume] = await Promise.all([
+      const [suppliers, maintenance, ccfg, cmembers, creviews, returns, stkMvs, bomMap, stConsume, seqs] = await Promise.all([
         this.suppliers.list(),
         this.maintenance.list(),
         this.committee.getConfig(),
@@ -1862,6 +1920,7 @@ const Repo = {
         this.stockMovements.list(500),
         this.bom.list(),
         this.stationConsumption.list(1000),
+        this.sequences.list(),
       ]);
 
       if (suppliers !== null) State.data.suppliers = suppliers;
@@ -1881,6 +1940,7 @@ const Repo = {
       // BOM: only override if cloud has data (preserves seed defaults on first run)
       if (bomMap !== null && Object.keys(bomMap).length > 0) State.data.bom = bomMap;
       if (stConsume !== null) State.data.stationConsumption = stConsume;
+      if (seqs !== null) State.data.sequences = seqs;
 
       State.save();
       console.log(`[Repo] Bootstrap complete in ${Date.now() - t0}ms — `, {
@@ -1889,6 +1949,7 @@ const Repo = {
         returns: returns?.length, stockMovements: stkMvs?.length,
         bomStations: bomMap ? Object.keys(bomMap).length : 0,
         stationConsumption: stConsume?.length,
+        sequences: seqs?.length,
       });
       return true;
     } catch (e) {
@@ -1938,6 +1999,10 @@ const Repo = {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'stock_movements' }, async () => {
         const list = await this.stockMovements.list(500);
         if (list !== null) { State.data.stockMovements = list; State.save(); this._refreshIfShowing('warehouses'); }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sequences' }, async () => {
+        const list = await this.sequences.list();
+        if (list !== null) { State.data.sequences = list; State.save(); this._refreshIfShowing('quality'); }
       })
       .subscribe((status) => {
         console.log('[Repo] Realtime status:', status);
@@ -2109,6 +2174,237 @@ const BOM = {
   },
 };
 
+/* ============ SEQUENCE ENGINE — MOC Buffer Sequencing ============ */
+// Handles the K4 → Buffer → MOC → Packaging flow with batched sequences.
+//
+// Concept: After K4 finishes, the WO sits in AT_BUFFER with a "bufferedQty".
+// MOC supervisor creates sequences (e.g. 1001-2000, 2001-3000) which flow
+// through MOC inspection then Packaging in order. Once ALL sequences are
+// either packaged or failed, the WO advances to AT_PMF.
+//
+// Math:
+//   Total sequence qty <= wo.bufferedQty
+//   wo.bufferedQty = wo.produced - wo.scrap_K1_to_K4
+//   wo.totalPackaged = Σ(seq.packagedQty) for all passed sequences
+//   wo.totalMOCScrap = Σ(seq.mocFailed) for all sequences
+
+const SEQ = {
+  // Get all sequences for a WO
+  forWO(woId) {
+    return (State.data.sequences || []).filter(s => s.woId === woId).sort((a,b) => a.startSerial - b.startSerial);
+  },
+
+  // Get total qty already allocated to sequences for this WO
+  allocatedQty(woId) {
+    return this.forWO(woId).reduce((sum, s) => sum + (s.qty || 0), 0);
+  },
+
+  // Get the highest endSerial for this WO (or 0 if none)
+  lastEndSerial(woId) {
+    const seqs = this.forWO(woId);
+    if (seqs.length === 0) return null;
+    return seqs.reduce((max, s) => Math.max(max, s.endSerial), 0);
+  },
+
+  // Get next start serial (lastEnd + 1, or baseSerial for first sequence)
+  nextStartSerial(woId) {
+    const last = this.lastEndSerial(woId);
+    if (last !== null) return last + 1;
+    return State.data.seqDefaults?.baseSerial || 1001;
+  },
+
+  // Buffered qty available to allocate to new sequences
+  remainingBufferQty(woId) {
+    const wo = Q.wo(woId);
+    if (!wo) return 0;
+    const buffered = wo.bufferedQty || (wo.produced - wo.scrap) || 0;
+    return Math.max(0, buffered - this.allocatedQty(woId));
+  },
+
+  // Create a new sequence (validates qty doesn't exceed buffer)
+  // Returns: { ok, seq?, error? }
+  create(woId, qty) {
+    const ar = State.lang === 'ar';
+    const wo = Q.wo(woId);
+    if (!wo) return { ok: false, error: 'WO not found' };
+    if (wo.currentStage !== 'AT_BUFFER' && wo.currentStage !== 'AT_MOC' && wo.currentStage !== 'AT_PACKAGING') {
+      return { ok: false, error: ar?'الـ WO ليس في منطقة الـ Buffer':'WO not at buffer stage' };
+    }
+    qty = parseInt(qty);
+    if (!qty || qty <= 0) return { ok: false, error: ar?'الكمية يجب أن تكون موجبة':'Qty must be positive' };
+
+    const remaining = this.remainingBufferQty(woId);
+    if (qty > remaining) {
+      return { ok: false, error: ar?`الكمية تتجاوز المتبقي (${remaining})`:`Qty exceeds remaining (${remaining})` };
+    }
+
+    if (!State.data.sequences) State.data.sequences = [];
+    const startSerial = this.nextStartSerial(woId);
+    const endSerial   = startSerial + qty - 1;
+    const seqNum      = this.forWO(woId).length + 1;
+    const seq = {
+      id: `${woId}-SEQ-${String(seqNum).padStart(3, '0')}`,
+      woId, qty,
+      startSerial, endSerial,
+      status: 'pending',           // pending → inspecting → passed | failed
+      mocPassed: 0,
+      mocFailed: 0,
+      mocBy: null, mocAt: null, mocNotes: null,
+      packagingStatus: 'waiting',  // waiting → received → packaged
+      packagedQty: 0,
+      packagedBy: null, packagedAt: null,
+      createdBy: State.user?.id,
+      createdAt: now(),
+    };
+    State.data.sequences.push(seq);
+
+    Audit.log('seq_create', 'Sequence', seq.id, { qty, startSerial, endSerial });
+    Movements.add('info', `📦 ${ar?'تم إنشاء سيكوينس':'Sequence created'}: ${seq.id} (${startSerial}-${endSerial}, ${qty} ${ar?'وحدة':'units'})`, { woId, seqId: seq.id });
+    State.save();
+
+    if (typeof Repo !== 'undefined' && Repo.sequences) {
+      Repo.sequences.upsert(seq).catch(e => console.error('[SEQ create sync]', e));
+    }
+    return { ok: true, seq };
+  },
+
+  // MOC starts inspecting a sequence
+  startMOC(seqId) {
+    const ar = State.lang === 'ar';
+    const seq = (State.data.sequences || []).find(s => s.id === seqId);
+    if (!seq) return { ok: false, error: 'Sequence not found' };
+    if (seq.status !== 'pending') return { ok: false, error: ar?'السيكوينس ليس في حالة pending':'Sequence not pending' };
+    seq.status = 'inspecting';
+    seq.mocStartedAt = now();
+    seq.mocBy = State.user?.id;
+    Audit.log('seq_moc_start', 'Sequence', seqId, {});
+    Movements.add('info', `🔍 ${ar?'بدء فحص MOC':'MOC started'}: ${seqId}`, { seqId, woId: seq.woId });
+    State.save();
+    if (typeof Repo !== 'undefined' && Repo.sequences) Repo.sequences.upsert(seq).catch(e=>console.error(e));
+    return { ok: true, seq };
+  },
+
+  // MOC completes inspection — passes/fails counts (failed = scrap inside the seq)
+  completeMOC(seqId, passed, failed, notes) {
+    const ar = State.lang === 'ar';
+    const seq = (State.data.sequences || []).find(s => s.id === seqId);
+    if (!seq) return { ok: false, error: 'Sequence not found' };
+    if (seq.status !== 'inspecting') return { ok: false, error: ar?'يجب بدء الفحص أولاً':'Must start inspection first' };
+    passed = parseInt(passed) || 0;
+    failed = parseInt(failed) || 0;
+    if (passed + failed > seq.qty) {
+      return { ok: false, error: ar?`المجموع (${passed+failed}) أكبر من حجم السيكوينس (${seq.qty})`:`Sum exceeds seq qty (${seq.qty})` };
+    }
+    if (passed + failed < seq.qty) {
+      return { ok: false, error: ar?`المجموع يجب أن يساوي حجم السيكوينس (${seq.qty})`:`Sum must equal seq qty (${seq.qty})` };
+    }
+
+    seq.mocPassed = passed;
+    seq.mocFailed = failed;
+    seq.mocNotes = notes || '';
+    seq.mocAt = now();
+    seq.status = passed > 0 ? 'passed' : 'failed';
+
+    // Update WO totals
+    const wo = Q.wo(seq.woId);
+    if (wo) {
+      wo.scrap = (wo.scrap || 0) + failed;  // MOC failures count as scrap
+      wo.totalMOCScrap = (wo.totalMOCScrap || 0) + failed;
+    }
+
+    Audit.log('seq_moc_complete', 'Sequence', seqId, { passed, failed, status: seq.status });
+    Movements.add(seq.status==='passed'?'ok':'warn',
+      `🔍 ${ar?'انتهاء فحص MOC':'MOC done'}: ${seqId} — ${passed}/${seq.qty} ${ar?'مقبول':'pass'}, ${failed} ${ar?'مرفوض':'fail'}`,
+      { seqId, woId: seq.woId });
+    State.save();
+    if (typeof Repo !== 'undefined' && Repo.sequences) Repo.sequences.upsert(seq).catch(e=>console.error(e));
+
+    // If sequence fully failed, may complete the WO (no packaging needed for it)
+    if (seq.status === 'failed') this._checkWOComplete(seq.woId);
+    return { ok: true, seq };
+  },
+
+  // Packaging picks up a passed sequence
+  startPackaging(seqId) {
+    const ar = State.lang === 'ar';
+    const seq = (State.data.sequences || []).find(s => s.id === seqId);
+    if (!seq) return { ok: false, error: 'Sequence not found' };
+    if (seq.status !== 'passed') return { ok: false, error: ar?'السيكوينس لم يجتز MOC':'Sequence not passed' };
+    if (seq.packagingStatus !== 'waiting') return { ok: false, error: ar?'السيكوينس بدأ تغليفه مسبقاً':'Already started' };
+    seq.packagingStatus = 'received';
+    seq.packagingStartedAt = now();
+    seq.packagedBy = State.user?.id;
+    Audit.log('seq_pkg_start', 'Sequence', seqId, {});
+    Movements.add('info', `📦 ${ar?'بدء تغليف':'Packaging started'}: ${seqId}`, { seqId, woId: seq.woId });
+    State.save();
+    if (typeof Repo !== 'undefined' && Repo.sequences) Repo.sequences.upsert(seq).catch(e=>console.error(e));
+    return { ok: true, seq };
+  },
+
+  // Packaging completes — packagedQty must equal mocPassed
+  completePackaging(seqId, packagedQty) {
+    const ar = State.lang === 'ar';
+    const seq = (State.data.sequences || []).find(s => s.id === seqId);
+    if (!seq) return { ok: false, error: 'Sequence not found' };
+    if (seq.packagingStatus !== 'received') return { ok: false, error: ar?'يجب بدء التغليف أولاً':'Must start packaging first' };
+    packagedQty = parseInt(packagedQty);
+    if (packagedQty !== seq.mocPassed) {
+      return { ok: false, error: ar?`الكمية المغلَّفة (${packagedQty}) يجب أن تساوي ما اجتاز MOC (${seq.mocPassed})`:`Packaged (${packagedQty}) must equal MOC pass (${seq.mocPassed})` };
+    }
+    seq.packagedQty = packagedQty;
+    seq.packagingStatus = 'packaged';
+    seq.packagedAt = now();
+    Audit.log('seq_pkg_complete', 'Sequence', seqId, { packagedQty });
+    Movements.add('ok', `✓ ${ar?'تم تغليف':'Packaged'}: ${seqId} — ${packagedQty} ${ar?'وحدة':'units'}`, { seqId, woId: seq.woId });
+    State.save();
+    if (typeof Repo !== 'undefined' && Repo.sequences) Repo.sequences.upsert(seq).catch(e=>console.error(e));
+
+    // Auto-advance check: if all sequences done AND remaining buffer = 0 → move WO to AT_PMF
+    this._checkWOComplete(seq.woId);
+    return { ok: true, seq };
+  },
+
+  // Check if all sequences for a WO are finalized → advance to PMF
+  _checkWOComplete(woId) {
+    const wo = Q.wo(woId);
+    if (!wo) return;
+    if (wo.currentStage !== 'AT_BUFFER' && wo.currentStage !== 'AT_MOC' && wo.currentStage !== 'AT_PACKAGING') return;
+    const seqs = this.forWO(woId);
+    if (seqs.length === 0) return;
+    const allDone = seqs.every(s => s.packagingStatus === 'packaged' || s.status === 'failed');
+    const remaining = this.remainingBufferQty(woId);
+    if (allDone && remaining === 0) {
+      // Calculate totals
+      wo.totalPackaged = seqs.reduce((sum, s) => sum + (s.packagedQty || 0), 0);
+      wo.produced = wo.totalPackaged; // final produced count = total packaged
+      // Advance directly to AT_PMF (skip buffer/moc/packaging stages)
+      const ar = State.lang === 'ar';
+      wo.history.push({
+        stage: 'AT_PMF',
+        action: 'auto_advance_after_sequences',
+        fromUser: State.user?.id, toUser: Q.ownerOfStage('AT_PMF'),
+        qty: wo.totalPackaged, scrap: wo.totalMOCScrap || 0,
+        ts: now(),
+        notes: ar?`اكتمل تغليف جميع الـ sequences (${seqs.length})`:`All sequences packaged (${seqs.length})`
+      });
+      wo.currentStage = 'AT_PMF';
+      wo.currentOwner = Q.ownerOfStage('AT_PMF');
+      Audit.log('wo_seq_complete', 'WorkOrder', woId, { sequences: seqs.length, totalPackaged: wo.totalPackaged });
+      Movements.add('ok', `🎉 ${ar?'اكتملت كل sequences':'All sequences done'}: ${woId} → PMF (${wo.totalPackaged} ${ar?'وحدة':'units'})`, { woId });
+      State.save();
+    }
+  },
+
+  // Mark WO as entering buffer (called from K4 advance)
+  enterBuffer(woId) {
+    const wo = Q.wo(woId);
+    if (!wo) return;
+    // bufferedQty = produced minus all prior scrap
+    wo.bufferedQty = (wo.produced || wo.qty || 0) - (wo.scrap || 0);
+    Audit.log('seq_buffer_entered', 'WorkOrder', woId, { bufferedQty: wo.bufferedQty });
+  },
+};
+
 /* ============ WORKFLOW ENGINE ============ */
 const WF = {
   // Move WO to next stage with full audit
@@ -2118,6 +2414,19 @@ const WF = {
     let next = nextStage(wo.currentStage);
     if (!next) { toast(State.lang === 'ar' ? 'لا توجد مرحلة تالية' : 'No next stage', 'warn'); return false; }
     if (!Perm.canActOnWO(wo)) { toast(t('no_perm'), 'error'); return false; }
+
+    const ar = State.lang === 'ar';
+
+    // Block manual advance through sequence-driven stages (AT_BUFFER, AT_MOC, AT_PACKAGING)
+    // These advance automatically when SEQ._checkWOComplete fires.
+    if (!opts.bypassSeq && (wo.currentStage === 'AT_BUFFER' || wo.currentStage === 'AT_MOC' || wo.currentStage === 'AT_PACKAGING')) {
+      const seqs = SEQ.forWO(woId);
+      const allDone = seqs.length > 0 && seqs.every(s => s.packagingStatus === 'packaged' || s.status === 'failed');
+      if (!allDone) {
+        toast(ar?'لا يمكن الانتقال يدوياً — أنشئ sequences وأكمل MOC والتغليف أولاً':'Cannot advance manually — finish all sequences via MOC and packaging first', 'error');
+        return false;
+      }
+    }
 
     // If next is AT_COMMITTEE but committee is disabled, skip it
     if (next === 'AT_COMMITTEE' && !State.data.committee?.enabled) {
@@ -2132,7 +2441,7 @@ const WF = {
       if (recipe.length > 0) {
         const validation = BOM.validate(woId, stationIdForStage);
         if (!validation.ok) {
-          const msg = State.lang === 'ar'
+          const msg = ar
             ? `لا يمكن البدء — مواد ناقصة:\n${validation.errors.map(e => '• ' + e.msg).join('\n')}`
             : `Cannot start — missing materials:\n${validation.errors.map(e => '• ' + e.msg).join('\n')}`;
           toast(msg, 'error');
@@ -2141,10 +2450,16 @@ const WF = {
         // Consume materials (idempotent)
         const result = BOM.consume(woId, stationIdForStage);
         if (!result.ok) {
-          toast(result.error || (State.lang === 'ar' ? 'فشل صرف المواد' : 'Material consumption failed'), 'error');
+          toast(result.error || (ar ? 'فشل صرف المواد' : 'Material consumption failed'), 'error');
           return false;
         }
       }
+    }
+
+    // When advancing INTO AT_BUFFER (i.e. K4 finishing) — calculate bufferedQty
+    if (next === 'AT_BUFFER') {
+      // Set bufferedQty before history is pushed, so it's available immediately
+      wo.bufferedQty = (opts.qty != null ? opts.qty : (wo.produced || wo.qty || 0)) - (wo.scrap || 0);
     }
 
     const fromUser = State.user.id;
@@ -3593,53 +3908,234 @@ View.suppliers = function() {
 // ─────── QUALITY (MOC) ───────
 View.quality = function() {
   const ar = State.lang === 'ar';
-  const pending = State.data.workOrders.filter(w => w.currentStage === 'AT_MOC');
-  const recent = State.data.workOrders.filter(w => w.history.some(h => h.action === 'accept' || h.action === 'reject')).slice(0, 10);
+  // WOs in buffer (waiting for sequences) + WOs being processed
+  const wosInFlow = State.data.workOrders.filter(w =>
+    w.currentStage === 'AT_BUFFER' || w.currentStage === 'AT_MOC' || w.currentStage === 'AT_PACKAGING'
+  );
+  const pendingSeqs    = (State.data.sequences || []).filter(s => s.status === 'pending');
+  const inspectingSeqs = (State.data.sequences || []).filter(s => s.status === 'inspecting');
+  const passedWaitingPkg = (State.data.sequences || []).filter(s => s.status === 'passed' && s.packagingStatus === 'waiting');
+  const inPackaging    = (State.data.sequences || []).filter(s => s.packagingStatus === 'received');
+  const completed      = (State.data.sequences || []).filter(s => s.packagingStatus === 'packaged' || s.status === 'failed').slice(0, 20);
+
+  const isQC = State.user.dept === 'QC' || Perm.isManager();
+
   document.getElementById('content').innerHTML = `
     <div class="page-header">
       <div>
-        <div class="page-title">${ar?'الجودة (MOC)':'Quality (MOC)'}</div>
-        <div class="page-sub">${ar?'فحص نهاية الإنتاج — قبول أو رفض الدفعات':'Final product control — accept or reject batches'}</div>
+        <div class="page-title">${ar?'الجودة (MOC) و Sequences':'Quality (MOC) & Sequences'}</div>
+        <div class="page-sub">${ar?'إدارة الـ Buffer وفحص Sequences وتسليمها للتغليف':'Buffer management, sequence inspection, and packaging handover'}</div>
       </div>
     </div>
-    <div class="card mb-2">
-      <div class="card-title">${ar?'بانتظار فحص MOC':'Awaiting MOC Inspection'} (${pending.length})</div>
-      ${pending.length === 0 ? `<div class="empty-state">${ar?'لا توجد دفعات بانتظار الفحص':'No batches awaiting inspection'}</div>` : `
-        <div style="overflow-x:auto"><table class="data">
-          <thead><tr><th>WO</th><th>${ar?'الكمية':'Qty'}</th><th>${ar?'مُنتج':'Produced'}</th><th>${ar?'Scrap':'Scrap'}</th><th>${ar?'منذ':'Since'}</th><th></th></tr></thead>
-          <tbody>${pending.map(w => `<tr>
-            <td class="mono"><b>${w.id}</b></td>
-            <td class="mono">${fmt.num(w.qty)}</td>
-            <td class="mono">${fmt.num(w.produced)}</td>
-            <td class="mono">${fmt.num(w.scrap)}</td>
-            <td class="text-mute mono">${fmt.ago(w.history[w.history.length-1]?.ts)}</td>
-            <td>
-              ${Perm.canAct('QC') ? `<button class="btn btn-sm btn-success" onclick="Action.mocCheck('${w.id}')">${t('moc_check')}</button>` : `<span class="text-mute" style="font-size:11px">${ar?'صلاحية QC':'QC only'}</span>`}
-            </td>
-          </tr>`).join('')}</tbody>
-        </table></div>
-      `}
+
+    <div class="kpi-grid">
+      <div class="kpi" style="--accent:var(--violet);--accent-bg:rgba(167,139,250,0.1)">
+        <div class="kpi-label">${ar?'WOs في الـ Buffer':'WOs in Buffer'}</div>
+        <div class="kpi-value">${wosInFlow.length}</div>
+      </div>
+      <div class="kpi" style="--accent:var(--amber);--accent-bg:rgba(245,158,11,0.1)">
+        <div class="kpi-label">${ar?'Sequences بانتظار فحص':'Pending MOC'}</div>
+        <div class="kpi-value">${pendingSeqs.length}</div>
+      </div>
+      <div class="kpi" style="--accent:var(--sky);--accent-bg:rgba(56,189,248,0.1)">
+        <div class="kpi-label">${ar?'قيد الفحص':'Inspecting'}</div>
+        <div class="kpi-value">${inspectingSeqs.length}</div>
+      </div>
+      <div class="kpi" style="--accent:var(--emerald);--accent-bg:rgba(16,185,129,0.1)">
+        <div class="kpi-label">${ar?'بانتظار التغليف':'Waiting Packaging'}</div>
+        <div class="kpi-value">${passedWaitingPkg.length}</div>
+      </div>
+      <div class="kpi" style="--accent:var(--gold);--accent-bg:rgba(245,185,66,0.1)">
+        <div class="kpi-label">${ar?'قيد التغليف':'Packaging'}</div>
+        <div class="kpi-value">${inPackaging.length}</div>
+      </div>
     </div>
-    <div class="card">
-      <div class="card-title">${ar?'فحوصات سابقة':'Recent Inspections'}</div>
-      ${recent.length === 0 ? `<div class="empty-state">${ar?'لا توجد':'None'}</div>` : `
+
+    <!-- WOs in buffer/flow with sequence creation -->
+    <div class="card mt-2">
+      <div class="card-title">📦 ${ar?'WOs في منطقة الـ Buffer':'WOs in Buffer Zone'} (${wosInFlow.length})</div>
+      ${wosInFlow.length === 0 ? `<div class="empty-state">${ar?'لا توجد WOs في الـ Buffer حالياً':'No WOs in buffer'}</div>` : `
         <div style="overflow-x:auto"><table class="data">
-          <thead><tr><th>WO</th><th>${ar?'النتيجة':'Result'}</th><th>${ar?'الكمية':'Qty'}</th><th>${ar?'المفتش':'Inspector'}</th><th>${ar?'تاريخ':'Date'}</th></tr></thead>
-          <tbody>${recent.map(w => {
-            const mocEntry = w.history.find(h => h.stage === 'AT_PMF' && h.action === 'accept') || w.history.find(h => h.stage === 'REJECTED');
-            if (!mocEntry) return '';
-            const inspector = Q.user(mocEntry.fromUser);
-            const accepted = mocEntry.stage === 'AT_PMF';
-            return `<tr><td class="mono"><b>${w.id}</b></td>
-              <td><span class="badge-status ${accepted?'b-active':'b-rejected'}">${accepted?(ar?'مقبول':'Accepted'):(ar?'مرفوض':'Rejected')}</span></td>
-              <td class="mono">${fmt.num(mocEntry.qty)}</td>
-              <td>${inspector?escapeHTML(ar?inspector.name:inspector.nameEn):'—'}</td>
-              <td class="mono text-mute">${fmt.date(mocEntry.ts)}</td>
+          <thead><tr>
+            <th>WO</th>
+            <th>${ar?'كمية البفر':'Buffered Qty'}</th>
+            <th>${ar?'مخصص':'Allocated'}</th>
+            <th>${ar?'متبقي':'Remaining'}</th>
+            <th>${ar?'Sequences':'Sequences'}</th>
+            <th>${ar?'الحالة':'Stage'}</th>
+            <th></th>
+          </tr></thead>
+          <tbody>${wosInFlow.map(w => {
+            const seqs = SEQ.forWO(w.id);
+            const allocated = SEQ.allocatedQty(w.id);
+            const remaining = SEQ.remainingBufferQty(w.id);
+            const buffered = w.bufferedQty || 0;
+            const passed = seqs.filter(s => s.status === 'passed').length;
+            const failed = seqs.filter(s => s.status === 'failed').length;
+            const pkg = seqs.filter(s => s.packagingStatus === 'packaged').length;
+            const stage = stageById(w.currentStage);
+            return `<tr>
+              <td class="mono"><b>${w.id}</b></td>
+              <td class="mono">${fmt.num(buffered)}</td>
+              <td class="mono">${fmt.num(allocated)}</td>
+              <td class="mono ${remaining > 0 ? '' : 'text-mute'}"><b>${fmt.num(remaining)}</b></td>
+              <td>
+                <span class="mono">${seqs.length}</span>
+                ${passed?` · <span style="color:var(--emerald)">✓${passed}</span>`:''}
+                ${failed?` · <span style="color:var(--rose)">✕${failed}</span>`:''}
+                ${pkg?` · <span style="color:var(--gold)">📦${pkg}</span>`:''}
+              </td>
+              <td><span class="badge-status">${escapeHTML(ar?stage.name:stage.nameEn)}</span></td>
+              <td>
+                ${isQC && remaining > 0 ? `<button class="btn btn-sm btn-primary" onclick="Action.createSequence('${w.id}')">+ ${ar?'سيكوينس':'Sequence'}</button>` : ''}
+                <button class="btn btn-sm btn-secondary" onclick="Action.viewSequences('${w.id}')">${ar?'عرض':'View'}</button>
+              </td>
             </tr>`;
           }).join('')}</tbody>
         </table></div>
       `}
     </div>
+
+    <!-- Pending sequences -->
+    ${pendingSeqs.length > 0 ? `
+      <div class="card mt-2">
+        <div class="card-title">⏳ ${ar?'Sequences بانتظار فحص MOC':'Sequences Awaiting MOC'} (${pendingSeqs.length})</div>
+        <div style="overflow-x:auto"><table class="data">
+          <thead><tr>
+            <th>${ar?'الرقم':'ID'}</th>
+            <th>WO</th>
+            <th>${ar?'الأرقام':'Range'}</th>
+            <th>${ar?'الكمية':'Qty'}</th>
+            <th>${ar?'منذ':'Since'}</th>
+            <th></th>
+          </tr></thead>
+          <tbody>${pendingSeqs.map(s => `
+            <tr>
+              <td class="mono"><b>${s.id}</b></td>
+              <td class="mono">${s.woId}</td>
+              <td class="mono">${s.startSerial} → ${s.endSerial}</td>
+              <td class="mono">${fmt.num(s.qty)}</td>
+              <td class="text-mute mono">${fmt.ago(s.createdAt)}</td>
+              <td>${isQC ? `<button class="btn btn-sm btn-primary" onclick="Action.startSeqMOC('${s.id}')">${ar?'بدء الفحص':'Start MOC'}</button>` : ''}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table></div>
+      </div>
+    ` : ''}
+
+    <!-- Inspecting sequences -->
+    ${inspectingSeqs.length > 0 ? `
+      <div class="card mt-2">
+        <div class="card-title">🔍 ${ar?'قيد الفحص':'Inspecting'} (${inspectingSeqs.length})</div>
+        <div style="overflow-x:auto"><table class="data">
+          <thead><tr>
+            <th>${ar?'الرقم':'ID'}</th>
+            <th>WO</th>
+            <th>${ar?'الأرقام':'Range'}</th>
+            <th>${ar?'الكمية':'Qty'}</th>
+            <th>${ar?'المفتش':'Inspector'}</th>
+            <th>${ar?'بدأ':'Started'}</th>
+            <th></th>
+          </tr></thead>
+          <tbody>${inspectingSeqs.map(s => {
+            const u = s.mocBy ? Q.user(s.mocBy) : null;
+            return `<tr>
+              <td class="mono"><b>${s.id}</b></td>
+              <td class="mono">${s.woId}</td>
+              <td class="mono">${s.startSerial} → ${s.endSerial}</td>
+              <td class="mono">${fmt.num(s.qty)}</td>
+              <td>${u?escapeHTML(ar?u.name:u.nameEn):'—'}</td>
+              <td class="text-mute mono">${fmt.ago(s.mocStartedAt)}</td>
+              <td>${isQC ? `<button class="btn btn-sm btn-success" onclick="Action.completeSeqMOC('${s.id}')">${ar?'إنهاء الفحص':'Complete'}</button>` : ''}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+      </div>
+    ` : ''}
+
+    <!-- Passed waiting for packaging -->
+    ${passedWaitingPkg.length > 0 ? `
+      <div class="card mt-2">
+        <div class="card-title">✓ ${ar?'اجتازت MOC — بانتظار التغليف':'Passed MOC — Awaiting Packaging'} (${passedWaitingPkg.length})</div>
+        <div style="overflow-x:auto"><table class="data">
+          <thead><tr>
+            <th>${ar?'الرقم':'ID'}</th>
+            <th>WO</th>
+            <th>${ar?'الأرقام':'Range'}</th>
+            <th>${ar?'مقبول':'Passed'}</th>
+            <th>${ar?'مرفوض':'Failed'}</th>
+            <th></th>
+          </tr></thead>
+          <tbody>${passedWaitingPkg.map(s => `
+            <tr>
+              <td class="mono"><b>${s.id}</b></td>
+              <td class="mono">${s.woId}</td>
+              <td class="mono">${s.startSerial} → ${s.endSerial}</td>
+              <td class="mono" style="color:var(--emerald)"><b>${fmt.num(s.mocPassed)}</b></td>
+              <td class="mono" style="color:var(--rose)">${fmt.num(s.mocFailed)}</td>
+              <td>${isQC ? `<button class="btn btn-sm btn-primary" onclick="Action.startSeqPackaging('${s.id}')">📦 ${ar?'بدء التغليف':'Start Packaging'}</button>` : ''}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table></div>
+      </div>
+    ` : ''}
+
+    <!-- In packaging -->
+    ${inPackaging.length > 0 ? `
+      <div class="card mt-2">
+        <div class="card-title">📦 ${ar?'قيد التغليف':'In Packaging'} (${inPackaging.length})</div>
+        <div style="overflow-x:auto"><table class="data">
+          <thead><tr>
+            <th>${ar?'الرقم':'ID'}</th>
+            <th>WO</th>
+            <th>${ar?'الأرقام':'Range'}</th>
+            <th>${ar?'المتوقع':'Expected'}</th>
+            <th>${ar?'العامل':'Operator'}</th>
+            <th></th>
+          </tr></thead>
+          <tbody>${inPackaging.map(s => {
+            const u = s.packagedBy ? Q.user(s.packagedBy) : null;
+            return `<tr>
+              <td class="mono"><b>${s.id}</b></td>
+              <td class="mono">${s.woId}</td>
+              <td class="mono">${s.startSerial} → ${s.endSerial}</td>
+              <td class="mono"><b>${fmt.num(s.mocPassed)}</b></td>
+              <td>${u?escapeHTML(ar?u.name:u.nameEn):'—'}</td>
+              <td>${isQC ? `<button class="btn btn-sm btn-success" onclick="Action.completeSeqPackaging('${s.id}')">${ar?'تم التغليف':'Done Packaging'}</button>` : ''}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+      </div>
+    ` : ''}
+
+    <!-- Completed -->
+    ${completed.length > 0 ? `
+      <div class="card mt-2">
+        <div class="card-title">✅ ${ar?'سيكوينسز مكتملة':'Completed Sequences'} (${ar?'آخر 20':'last 20'})</div>
+        <div style="overflow-x:auto"><table class="data">
+          <thead><tr>
+            <th>${ar?'الرقم':'ID'}</th>
+            <th>WO</th>
+            <th>${ar?'الأرقام':'Range'}</th>
+            <th>${ar?'النتيجة':'Result'}</th>
+            <th>${ar?'مغلَّف':'Packaged'}</th>
+            <th>${ar?'تاريخ':'Date'}</th>
+          </tr></thead>
+          <tbody>${completed.map(s => `
+            <tr>
+              <td class="mono"><b>${s.id}</b></td>
+              <td class="mono">${s.woId}</td>
+              <td class="mono">${s.startSerial} → ${s.endSerial}</td>
+              <td>${s.status==='passed'
+                ? `<span class="badge-status b-completed">✓ ${s.mocPassed}/${s.qty}</span>`
+                : `<span class="badge-status b-rejected">✕ ${s.mocFailed}/${s.qty}</span>`}</td>
+              <td class="mono">${s.packagedQty || '—'}</td>
+              <td class="text-mute mono">${fmt.date(s.packagedAt || s.mocAt || s.createdAt)}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table></div>
+      </div>
+    ` : ''}
   `;
 };
 
@@ -5554,6 +6050,226 @@ const Action = {
     });
     App.closeModal();
     App.goto('returns');
+  },
+
+  // ─────── SEQUENCE WORKFLOW — Buffer → MOC → Packaging ───────
+
+  // Helper: update sequence range preview when batch size changes
+  _updateSeqRange(startSerial) {
+    const v = parseInt(document.getElementById('seqQty')?.value) || 0;
+    const el = document.getElementById('seqRangePreview');
+    if (el) el.textContent = startSerial + ' → ' + (startSerial + v - 1);
+  },
+
+  // Helper: update MOC sum preview when pass/fail counts change
+  _updateMocSum(expectedTotal) {
+    const p = parseInt(document.getElementById('mocPassed')?.value) || 0;
+    const f = parseInt(document.getElementById('mocFailed')?.value) || 0;
+    const sum = p + f;
+    const el = document.getElementById('mocSumPreview');
+    if (el) {
+      el.textContent = sum;
+      el.style.color = sum === expectedTotal ? 'var(--emerald)' : 'var(--rose)';
+    }
+  },
+
+  // Create a new sequence on a WO sitting in buffer
+  createSequence(woId) {
+    const ar = State.lang === 'ar';
+    if (State.user.dept !== 'QC' && !Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
+    const wo = Q.wo(woId);
+    if (!wo) return;
+    const remaining = SEQ.remainingBufferQty(woId);
+    if (remaining <= 0) { toast(ar?'لا توجد وحدات متبقية في الـ buffer':'No buffer remaining','error'); return; }
+    const defaultBatch = Math.min(State.data.seqDefaults?.batchSize || 1000, remaining);
+    const nextStart = SEQ.nextStartSerial(woId);
+
+    const body = `
+      <div style="background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.25);border-radius:9px;padding:12px;margin-bottom:14px;font-size:11.5px">
+        📦 <b style="color:var(--violet)">${ar?'إنشاء سيكوينس جديد':'Create New Sequence'}</b>
+        <div style="margin-top:6px;color:var(--text-2)">${ar?'WO:':'WO:'} <b>${woId}</b> · ${ar?'متبقي في الـ buffer:':'Remaining in buffer:'} <b class="mono">${fmt.num(remaining)}</b></div>
+      </div>
+      <div class="form-grid">
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'الرقم البدائي (Start Serial)':'Start Serial'}</label>
+            <input class="mono" value="${nextStart}" readonly style="background:var(--glass-2)">
+            <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">${ar?'يُحسب تلقائياً من آخر سيكوينس':'Auto-calculated from last sequence'}</div>
+          </div>
+          <div class="field">
+            <label>${ar?'حجم الدفعة':'Batch Size'} <span class="req">*</span></label>
+            <input id="seqQty" type="number" min="1" max="${remaining}" value="${defaultBatch}" oninput="Action._updateSeqRange(${nextStart})">
+            <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">${ar?`الحد الأقصى: ${remaining}`:`Max: ${remaining}`}</div>
+          </div>
+        </div>
+        <div style="background:var(--glass);padding:10px;border-radius:7px;font-size:11.5px">
+          <span class="text-mute">${ar?'الأرقام التسلسلية:':'Serial range:'}</span>
+          <span class="mono"><b id="seqRangePreview">${nextStart} → ${nextStart + defaultBatch - 1}</b></span>
+        </div>
+      </div>
+    `;
+    App.openModal(`${ar?'سيكوينس جديد':'New Sequence'} — ${woId}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.saveCreateSequence('${woId}')">${ar?'إنشاء':'Create'}</button>`, true);
+  },
+
+  saveCreateSequence(woId) {
+    const ar = State.lang === 'ar';
+    const qty = parseInt(document.getElementById('seqQty').value);
+    const result = SEQ.create(woId, qty);
+    if (!result.ok) { toast(result.error, 'error'); return; }
+    App.closeModal();
+    toast(ar?`✓ تم إنشاء ${result.seq.id}`:`✓ Created ${result.seq.id}`,'success');
+    View.quality();
+  },
+
+  // View all sequences for a WO
+  viewSequences(woId) {
+    const ar = State.lang === 'ar';
+    const wo = Q.wo(woId);
+    if (!wo) return;
+    const seqs = SEQ.forWO(woId);
+    const allocated = SEQ.allocatedQty(woId);
+    const remaining = SEQ.remainingBufferQty(woId);
+
+    const body = `
+      <div style="background:var(--glass-2);padding:11px;border-radius:8px;margin-bottom:14px;font-size:12px">
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px">
+          <span class="text-mute">WO:</span><b class="mono">${woId}</b>
+          <span class="text-mute">${ar?'الكمية الأصلية:':'Original qty:'}</span><b class="mono">${fmt.num(wo.qty)}</b>
+          <span class="text-mute">${ar?'كمية الـ Buffer:':'Buffered:'}</span><b class="mono">${fmt.num(wo.bufferedQty || 0)}</b>
+          <span class="text-mute">${ar?'مخصص:':'Allocated:'}</span><b class="mono">${fmt.num(allocated)}</b>
+          <span class="text-mute">${ar?'متبقي:':'Remaining:'}</span><b class="mono">${fmt.num(remaining)}</b>
+        </div>
+      </div>
+      ${seqs.length === 0 ? `<div class="empty-state">${ar?'لا توجد sequences بعد':'No sequences yet'}</div>` : `
+        <div style="overflow-x:auto"><table class="data">
+          <thead><tr>
+            <th>${ar?'الرقم':'ID'}</th>
+            <th>${ar?'الأرقام':'Range'}</th>
+            <th>${ar?'الكمية':'Qty'}</th>
+            <th>${ar?'حالة MOC':'MOC Status'}</th>
+            <th>${ar?'مقبول/مرفوض':'Pass/Fail'}</th>
+            <th>${ar?'حالة التغليف':'Pkg Status'}</th>
+            <th>${ar?'مغلَّف':'Packaged'}</th>
+          </tr></thead>
+          <tbody>${seqs.map(s => `
+            <tr>
+              <td class="mono"><b>${s.id}</b></td>
+              <td class="mono">${s.startSerial} → ${s.endSerial}</td>
+              <td class="mono">${s.qty}</td>
+              <td><span class="badge-status">${s.status}</span></td>
+              <td class="mono">${s.mocPassed||0} / ${s.mocFailed||0}</td>
+              <td><span class="badge-status">${s.packagingStatus}</span></td>
+              <td class="mono">${s.packagedQty || '—'}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table></div>
+      `}
+    `;
+    App.openModal(`${ar?'Sequences للـ WO':'Sequences for'} ${woId}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${ar?'إغلاق':'Close'}</button>`, true);
+  },
+
+  // Start MOC inspection on a pending sequence
+  startSeqMOC(seqId) {
+    if (State.user.dept !== 'QC' && !Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
+    const result = SEQ.startMOC(seqId);
+    if (!result.ok) { toast(result.error, 'error'); return; }
+    toast(State.lang==='ar'?'بدأ الفحص':'Inspection started','success');
+    View.quality();
+  },
+
+  // Complete MOC inspection — enter pass/fail counts
+  completeSeqMOC(seqId) {
+    const ar = State.lang === 'ar';
+    if (State.user.dept !== 'QC' && !Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
+    const seq = (State.data.sequences || []).find(s => s.id === seqId);
+    if (!seq) return;
+
+    const body = `
+      <div style="background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.25);border-radius:9px;padding:11px;margin-bottom:14px;font-size:11.5px">
+        🔍 <b style="color:var(--sky)">${ar?'إنهاء فحص MOC':'Complete MOC Inspection'}</b>
+        <div style="margin-top:6px;color:var(--text-2)">${seq.id} · ${ar?'الأرقام':'Range'}: <b class="mono">${seq.startSerial} → ${seq.endSerial}</b> · ${ar?'الكمية':'Qty'}: <b class="mono">${seq.qty}</b></div>
+      </div>
+      <div class="form-grid">
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'مقبول (Passed)':'Passed'} <span class="req">*</span></label>
+            <input id="mocPassed" type="number" min="0" max="${seq.qty}" value="${seq.qty}" oninput="Action._updateMocSum(${seq.qty})">
+          </div>
+          <div class="field">
+            <label>${ar?'مرفوض (Failed)':'Failed'} <span class="req">*</span></label>
+            <input id="mocFailed" type="number" min="0" max="${seq.qty}" value="0" oninput="Action._updateMocSum(${seq.qty})">
+          </div>
+        </div>
+        <div style="background:var(--glass-2);padding:10px;border-radius:7px;font-size:11.5px">
+          <span class="text-mute">${ar?'المجموع يجب أن يساوي':'Total must equal'}:</span>
+          <b class="mono">${seq.qty}</b>
+          <span class="text-mute" style="margin-${ar?'right':'left'}:14px">${ar?'الحالي':'current'}:</span>
+          <b class="mono" id="mocSumPreview">${seq.qty}</b>
+        </div>
+        <div class="field">
+          <label>${ar?'ملاحظات (اختياري)':'Notes (optional)'}</label>
+          <textarea id="mocNotes" rows="2" placeholder="${ar?'سبب الرفض، أنواع العيوب':'Rejection reasons, defect types'}"></textarea>
+        </div>
+      </div>
+    `;
+    App.openModal(`${ar?'إنهاء فحص':'Complete'} — ${seqId}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.saveCompleteSeqMOC('${seqId}')">${ar?'تأكيد':'Confirm'}</button>`, true);
+  },
+
+  saveCompleteSeqMOC(seqId) {
+    const passed = parseInt(document.getElementById('mocPassed').value) || 0;
+    const failed = parseInt(document.getElementById('mocFailed').value) || 0;
+    const notes = document.getElementById('mocNotes').value.trim();
+    const result = SEQ.completeMOC(seqId, passed, failed, notes);
+    if (!result.ok) { toast(result.error, 'error'); return; }
+    App.closeModal();
+    toast(State.lang==='ar'?`✓ تم: ${passed} مقبول، ${failed} مرفوض`:`✓ Done: ${passed} pass, ${failed} fail`,'success');
+    View.quality();
+  },
+
+  // Start packaging on a passed sequence
+  startSeqPackaging(seqId) {
+    if (State.user.dept !== 'QC' && !Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
+    const result = SEQ.startPackaging(seqId);
+    if (!result.ok) { toast(result.error, 'error'); return; }
+    toast(State.lang==='ar'?'بدأ التغليف':'Packaging started','success');
+    View.quality();
+  },
+
+  // Complete packaging — confirm packaged qty
+  completeSeqPackaging(seqId) {
+    const ar = State.lang === 'ar';
+    if (State.user.dept !== 'QC' && !Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
+    const seq = (State.data.sequences || []).find(s => s.id === seqId);
+    if (!seq) return;
+
+    const body = `
+      <div style="background:rgba(245,185,66,0.06);border:1px solid rgba(245,185,66,0.25);border-radius:9px;padding:11px;margin-bottom:14px;font-size:11.5px">
+        📦 <b style="color:var(--gold)">${ar?'إنهاء التغليف':'Complete Packaging'}</b>
+        <div style="margin-top:6px;color:var(--text-2)">${seq.id} · ${ar?'المتوقع':'Expected'}: <b class="mono">${seq.mocPassed}</b></div>
+      </div>
+      <div class="field">
+        <label>${ar?'الكمية المغلَّفة':'Packaged Quantity'} <span class="req">*</span></label>
+        <input id="pkgQty" type="number" min="${seq.mocPassed}" max="${seq.mocPassed}" value="${seq.mocPassed}">
+        <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">${ar?'يجب أن تساوي عدد ما اجتاز MOC':'Must equal MOC pass count'}</div>
+      </div>
+    `;
+    App.openModal(`${ar?'إنهاء تغليف':'Complete'} — ${seqId}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.saveCompleteSeqPackaging('${seqId}')">${ar?'تأكيد':'Confirm'}</button>`, true);
+  },
+
+  saveCompleteSeqPackaging(seqId) {
+    const qty = parseInt(document.getElementById('pkgQty').value);
+    const result = SEQ.completePackaging(seqId, qty);
+    if (!result.ok) { toast(result.error, 'error'); return; }
+    App.closeModal();
+    toast(State.lang==='ar'?'✓ تم التغليف':'✓ Packaged','success');
+    View.quality();
   },
 
   // ─────── ADMIN — USER CRUD ───────
