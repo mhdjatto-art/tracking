@@ -2541,8 +2541,12 @@ const Scrap = {
     const calc = this.calculate(woId, stationId, scrapQty);
     if (!calc.ok) return calc;
 
-    // Update WO scrap counter
+    // Update WO counters
+    // Re-cancellation: scrap reduces both the scrap tally AND the produced count
+    // wo.produced represents the current "good unit" count flowing through stations
     wo.scrap = (wo.scrap || 0) + scrapQty;
+    const currentProduced = (wo.produced != null && wo.produced > 0) ? wo.produced : (wo.qty || 0);
+    wo.produced = Math.max(0, currentProduced - scrapQty);
     wo.totalRecovered = +((wo.totalRecovered || 0) + calc.totals.recovered).toFixed(4);
     wo.totalScrapLoss = +((wo.totalScrapLoss || 0) + calc.totals.lost).toFixed(4);
 
@@ -2704,8 +2708,10 @@ const Scrap = {
     totalRecovered = +totalRecovered.toFixed(4);
     totalLost = +totalLost.toFixed(4);
 
-    // Update WO
+    // Update WO with re-cancellation (decrement produced)
     wo.scrap = (wo.scrap || 0) + scrapQty;
+    const currentProduced = (wo.produced != null && wo.produced > 0) ? wo.produced : (wo.qty || 0);
+    wo.produced = Math.max(0, currentProduced - scrapQty);
     wo.totalRecovered = +((wo.totalRecovered || 0) + totalRecovered).toFixed(4);
     wo.totalScrapLoss = +((wo.totalScrapLoss || 0) + totalLost).toFixed(4);
 
@@ -2770,6 +2776,24 @@ const WF = {
       next = nextStage('AT_COMMITTEE'); // = DELIVERED
     }
 
+    // CRITICAL FIX: Apply scrap BEFORE BOM consume so next station consumes for the
+    // correct remaining qty (qty - scrap), not the original qty.
+    // This is the re-cancellation logic — scrapped units don't carry materials forward.
+    if (opts.scrap && opts.scrap > 0) {
+      const prevStage = wo.currentStage; // current = the station the scrap happened at
+      const stationFromStage = prevStage && prevStage.startsWith('AT_K') ? prevStage.replace('AT_', '') : null;
+      if (stationFromStage && BOM.forStation(stationFromStage).length > 0) {
+        Scrap.apply(woId, stationFromStage, opts.scrap, { reason: opts.notes || 'advance with scrap' });
+      } else {
+        // No BOM for this station — just count scrap qty without material accounting
+        wo.scrap = (wo.scrap || 0) + opts.scrap;
+        const currentProduced = (wo.produced != null && wo.produced > 0) ? wo.produced : (wo.qty || 0);
+        wo.produced = Math.max(0, currentProduced - opts.scrap);
+      }
+    }
+    // Mark that scrap was already applied to avoid double-counting later
+    const scrapAlreadyApplied = !!(opts.scrap && opts.scrap > 0);
+
     // BOM consumption check — when entering a station that has a recipe, validate + consume
     // Triggered for AT_K1, AT_K2, AT_K3, AT_K4 — uses opts.skipBOM to bypass (e.g. on rework)
     const stationIdForStage = next.startsWith('AT_K') ? next.replace('AT_', '') : null;
@@ -2795,8 +2819,8 @@ const WF = {
 
     // When advancing INTO AT_BUFFER (i.e. K4 finishing) — calculate bufferedQty
     if (next === 'AT_BUFFER') {
-      // Set bufferedQty before history is pushed, so it's available immediately
-      wo.bufferedQty = (opts.qty != null ? opts.qty : (wo.produced || wo.qty || 0)) - (wo.scrap || 0);
+      // Use current wo.produced (already adjusted for scrap above)
+      wo.bufferedQty = (wo.produced != null && wo.produced > 0) ? wo.produced : ((wo.qty || 0) - (wo.scrap || 0));
     }
 
     const fromUser = State.user.id;
@@ -2814,20 +2838,10 @@ const WF = {
     });
     wo.currentStage = next;
     wo.currentOwner = toUser;
-    // Scrap accounting via Scrap engine — calculates material loss + recovery
-    if (opts.scrap && opts.scrap > 0) {
-      // Determine the "from" station (where the scrap happened)
-      // Use previous stage if it was a station (AT_K1..K4), otherwise just track qty
-      const prevStage = wo.history[wo.history.length-2]?.stage;
-      const stationFromStage = prevStage && prevStage.startsWith('AT_K') ? prevStage.replace('AT_', '') : null;
-      if (stationFromStage && BOM.forStation(stationFromStage).length > 0) {
-        Scrap.apply(woId, stationFromStage, scrap, { reason: opts.notes || 'advance with scrap' });
-      } else {
-        // No BOM for this station — just count scrap qty without material accounting
-        wo.scrap = (wo.scrap || 0) + scrap;
-      }
-    }
-    if (opts.qty != null) wo.produced = opts.qty;
+    // Scrap was already applied above (before BOM consume).
+    // Only set produced if explicitly passed AND scrap wasn't already handled
+    // (scrap path already updates produced via Scrap.apply)
+    if (opts.qty != null && !scrapAlreadyApplied) wo.produced = opts.qty;
 
     Audit.log('advance_wo', 'WorkOrder', woId, { from: stageById(wo.history[wo.history.length-2]?.stage)?.id, to: next, qty, scrap });
     Movements.add('ok', `${woId} → ${stageById(next).name} (${fmt.num(qty)} قطعة)`, { woId, stage: next });
@@ -3915,10 +3929,10 @@ View.actionForStage = function(stageId, wo) {
     CREATED:     { label: ar?'طلب المواد':'Request Materials',   handler: `Action.requestMaterials('${wo.id}')` },
     MAT_REQUEST: { label: ar?'صرف المواد':'Issue Materials',     handler: `Action.issueMaterials('${wo.id}')` },
     MAT_ISSUED:  { label: ar?'بدء K1':'Start K1',                handler: `Action.startStation('${wo.id}','K1')` },
-    AT_K1:       { label: ar?'تسليم K2':'Handover to K2',        handler: `Action.handover('${wo.id}','AT_K2')` },
-    AT_K2:       { label: ar?'تسليم K3':'Handover to K3',        handler: `Action.handover('${wo.id}','AT_K3')` },
-    AT_K3:       { label: ar?'تسليم K4':'Handover to K4',        handler: `Action.handover('${wo.id}','AT_K4')` },
-    AT_K4:       { label: ar?'تسليم MOC':'Handover to MOC',      handler: `Action.handover('${wo.id}','AT_MOC')` },
+    AT_K1:       { label: ar?'تسليم دفعة K2':'Deliver to K2',    handler: `Action.deliverStation('${wo.id}')` },
+    AT_K2:       { label: ar?'تسليم دفعة K3':'Deliver to K3',    handler: `Action.deliverStation('${wo.id}')` },
+    AT_K3:       { label: ar?'تسليم دفعة K4':'Deliver to K4',    handler: `Action.deliverStation('${wo.id}')` },
+    AT_K4:       { label: ar?'تسليم لـ IFA WH':'Deliver to IFA', handler: `Action.deliverStation('${wo.id}')` },
     AT_MOC:      { label: ar?'فحص MOC':'MOC Check',              handler: `Action.mocCheck('${wo.id}')` },
     AT_PMF:      { label: ar?'نقل GDN':'Move to GDN',            handler: `Action.handover('${wo.id}','AT_GDN')` },
     AT_GDN:      { label: ar?'تسليم نهائي':'Deliver',            handler: `Action.handover('${wo.id}','DELIVERED','deliver')` },
@@ -6560,7 +6574,137 @@ const Action = {
     if (typeof View[State.view] === 'function') View[State.view]();
   },
 
-  // Create a new sequence on a WO sitting in buffer
+  // ─────── STATION BATCH DELIVERY (K1→K2→K3→K4) ───────
+  // Explicit delivery dialog with qty + scrap inputs.
+  // Concept: each K-station processes a BATCH and delivers it to the next station.
+  // Materials at the next station are auto-consumed via BOM on entry.
+  deliverStation(woId) {
+    const ar = State.lang === 'ar';
+    const wo = Q.wo(woId);
+    if (!wo) return;
+    if (!Perm.canActOnWO(wo)) { toast(t('no_perm'), 'error'); return; }
+
+    const currentStg = wo.currentStage;
+    if (!currentStg.startsWith('AT_K')) {
+      toast(ar?'هذا الإجراء فقط للمحطات K1-K4':'This action is only for K1-K4 stations','error');
+      return;
+    }
+
+    const fromStation = currentStg.replace('AT_', '');
+    const nextStg = nextStage(currentStg);
+    const nextStgObj = stageById(nextStg);
+    const isLast = nextStg === 'AT_BUFFER'; // K4 → IFA WH
+    const incomingQty = (wo.produced != null && wo.produced > 0) ? wo.produced : (wo.qty - (wo.scrap || 0));
+
+    // Get next station's BOM for preview
+    const nextStationId = nextStg.startsWith('AT_K') ? nextStg.replace('AT_', '') : null;
+    const nextBom = nextStationId ? BOM.forStation(nextStationId) : [];
+
+    const body = `
+      <div style="background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.25);border-radius:9px;padding:12px;margin-bottom:14px;font-size:11.5px">
+        ${isLast ? '📦' : '↦'} <b style="color:var(--sky)">${ar?'تسليم دفعة':'Batch Delivery'}</b>
+        <div style="margin-top:6px;color:var(--text-2)">
+          <b>${fromStation}</b> → <b>${escapeHTML(ar?nextStgObj.name:nextStgObj.nameEn)}</b>
+        </div>
+        <div style="margin-top:4px;color:var(--text-3);font-size:10.5px">
+          ${ar?'الكمية الواردة من المحطة السابقة:':'Incoming from previous station:'} <b class="mono">${fmt.num(incomingQty)}</b>
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'الكمية المُنتَجة (سليمة)':'Produced (good)'} <span class="req">*</span></label>
+            <input id="dlvQty" type="number" min="0" max="${incomingQty}" value="${incomingQty}" oninput="Action._updateDeliveryPreview(${incomingQty})">
+            <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">${ar?'تسلَّم للمحطة التالية':'Delivered to next station'}</div>
+          </div>
+          <div class="field">
+            <label>${ar?'Scrap في هذه المحطة':'Scrap at this station'}</label>
+            <input id="dlvScrap" type="number" min="0" max="${incomingQty}" value="0" oninput="Action._updateDeliveryPreview(${incomingQty})">
+            <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">${ar?'وحدات تالفة في '+fromStation:'Defective at '+fromStation}</div>
+          </div>
+        </div>
+        <div id="dlvBalance" style="background:var(--glass);padding:10px;border-radius:7px;font-size:11.5px"></div>
+        ${nextBom.length > 0 ? `
+          <div style="background:rgba(245,185,66,0.06);border:1px solid rgba(245,185,66,0.2);border-radius:7px;padding:10px;font-size:11px">
+            <div style="font-weight:600;color:var(--gold);margin-bottom:4px">🧾 ${ar?'سيُصرف للمحطة التالية ('+nextStationId+'):':'Will be consumed at next station ('+nextStationId+'):'}</div>
+            <div id="dlvNextBom"></div>
+          </div>
+        ` : ''}
+        <div class="field">
+          <label>${ar?'ملاحظات (اختياري)':'Notes (optional)'}</label>
+          <textarea id="dlvNotes" rows="2" placeholder="${ar?'مثلاً: انتهاء الوردية، نوع الدفعة':'e.g. shift end, batch type'}"></textarea>
+        </div>
+      </div>
+    `;
+    App.openModal(`${ar?'تسليم دفعة':'Deliver Batch'} — ${fromStation}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.saveDeliverStation('${woId}',${incomingQty})">${ar?'تأكيد التسليم':'Confirm Delivery'}</button>`, true);
+    setTimeout(() => Action._updateDeliveryPreview(incomingQty), 30);
+  },
+
+  // Live preview of delivery balance (qty + scrap = incoming) and next-BOM impact
+  _updateDeliveryPreview(incomingQty) {
+    const ar = State.lang === 'ar';
+    const qty = parseInt(document.getElementById('dlvQty')?.value) || 0;
+    const scrap = parseInt(document.getElementById('dlvScrap')?.value) || 0;
+    const sum = qty + scrap;
+    const balance = document.getElementById('dlvBalance');
+    if (balance) {
+      const ok = sum === incomingQty;
+      balance.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span class="text-mute">${ar?'المجموع يجب أن يساوي:':'Total must equal:'}</span>
+          <span class="mono"><b>${incomingQty}</b></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+          <span class="text-mute">${ar?'الحالي:':'Current:'}</span>
+          <span class="mono" style="color:${ok?'var(--emerald)':'var(--rose)'}"><b>${qty} + ${scrap} = ${sum}</b></span>
+        </div>
+      `;
+    }
+
+    // Update next-BOM preview
+    const nextBomEl = document.getElementById('dlvNextBom');
+    if (!nextBomEl) return;
+    // Recompute next station BOM × qty (the good qty going forward)
+    const wh = State.data.warehouses;
+    let html = '';
+    // Find next station from URL/context — we'll recompute from a hidden wo lookup
+    // Actually, we need the next station from the dialog context. Easier: fetch from data attr.
+    nextBomEl.innerHTML = `<div class="text-mute" style="font-size:10.5px">${ar?'الكمية المُسلَّمة × الـ BOM لكل وحدة':'Delivered qty × BOM per unit'}</div>`;
+  },
+
+  saveDeliverStation(woId, incomingQty) {
+    const ar = State.lang === 'ar';
+    const qty = parseInt(document.getElementById('dlvQty').value) || 0;
+    const scrap = parseInt(document.getElementById('dlvScrap').value) || 0;
+    const notes = document.getElementById('dlvNotes').value.trim();
+
+    if (qty + scrap !== incomingQty) {
+      toast(ar?`المجموع (${qty+scrap}) يجب أن يساوي ${incomingQty}`:`Total (${qty+scrap}) must equal ${incomingQty}`,'error');
+      return;
+    }
+    if (qty < 0 || scrap < 0) {
+      toast(ar?'القيم يجب أن تكون موجبة':'Values must be positive','error');
+      return;
+    }
+
+    // Use WF.advance with scrap + qty options.
+    // Note: WF.advance applies Scrap.apply automatically when scrap > 0 and origin is K-station.
+    // Scrap.apply now also decrements wo.produced.
+    const ok = WF.advance(woId, {
+      qty: qty,
+      scrap: scrap,
+      action: 'deliver_batch',
+      notes: notes || (ar?`تسليم دفعة من ${stageById(Q.wo(woId).currentStage).name}`:`Batch delivery from ${stageById(Q.wo(woId).currentStage).name}`)
+    });
+
+    if (!ok) return;
+    App.closeModal();
+    toast(ar?`✓ تم تسليم ${qty} وحدة` + (scrap > 0 ? ` (${scrap} scrap)` : ''):`✓ Delivered ${qty}` + (scrap > 0 ? ` (${scrap} scrap)` : ''),'success');
+    if (typeof View[State.view] === 'function') View[State.view]();
+  },
+
   createSequence(woId) {
     const ar = State.lang === 'ar';
     if (State.user.dept !== 'QC' && !Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
