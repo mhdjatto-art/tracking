@@ -1243,6 +1243,18 @@ const Movements = {
     });
     if (State.data.movements.length > 100) State.data.movements.length = 100;
     State.save();
+  },
+  addStock({ whId, sku, type, qty, ref, notes }) {
+    if (!State.data.stockMovements) State.data.stockMovements = [];
+    State.data.stockMovements.unshift({
+      id: uid('SM'), ts: now(),
+      whId, sku, type,
+      qty: (type === 'issue') ? -Math.abs(qty) : qty,
+      ref: ref || '',
+      notes: notes || '',
+      user: State.user?.id, userName: State.user?.name,
+    });
+    if (State.data.stockMovements.length > 5000) State.data.stockMovements.length = 5000;
   }
 };
 
@@ -1382,6 +1394,7 @@ const Seed = {
       workOrders: WOs,
       maintenance,
       movements,
+      stockMovements: [],
       audit: [
         { id: uid('AUD'), ts: now(), user: 'system', userName: 'النظام', action: 'system_init', entity: 'System', entityId: 'init', details: { note: 'تهيئة النظام بدون بيانات تجريبية' } },
       ],
@@ -2637,14 +2650,19 @@ View.warehouses = function() {
     <div class="page-header">
       <div>
         <div class="page-title">${ar?'المستودعات':'Warehouses'}</div>
-        <div class="page-sub">${ar?'حركة المخزون عبر مستودعات Raw → IFA → PMF → GDN':'Stock flow across Raw → IFA → PMF → GDN warehouses'}</div>
+        <div class="page-sub">${ar?'إدارة المخزون عبر استمارات موثّقة — كل حركة لها سجل':'Stock management via documented forms — every movement has a record'}</div>
       </div>
     </div>
+    ${visible.length === 0 ? `<div class="empty-state">${ar?'لا توجد مستودعات لقسمك':'No warehouses for your department'}</div>` : ''}
     ${visible.map(wh => {
       const mgr = Q.user(wh.managerId);
       const dept = Q.dept(wh.dept);
       const totalQty = wh.items.reduce((s,i) => s + i.qty, 0);
       const totalAlloc = wh.items.reduce((s,i) => s + i.allocated, 0);
+      const canEdit = isMgr || (userDept === wh.dept);
+      const movements = (State.data.stockMovements || []).filter(m => m.whId === wh.id);
+      const recentMoves = movements.slice(0, 5);
+
       return `<div class="card mb-2">
         <div class="flex justify-between items-center mb-2 flex-wrap gap-2">
           <div>
@@ -2652,7 +2670,7 @@ View.warehouses = function() {
               <span class="dept-tag" style="--dept-color:${dept.color};--dept-bg:${dept.bg};font-size:11px;padding:3px 8px">${escapeHTML(wh.code)}</span>
               ${escapeHTML(ar?wh.name:wh.nameEn)}
             </div>
-            <div class="text-mute mt-1" style="font-size:11.5px">${ar?'أمين المستودع:':'Manager:'} <b style="color:var(--text-2)">${escapeHTML(mgr?(ar?mgr.name:mgr.nameEn):'—')}</b></div>
+            <div class="text-mute mt-1" style="font-size:11.5px">${ar?'أمين المستودع:':'Manager:'} <b style="color:var(--text-2)">${escapeHTML(mgr?(ar?mgr.name:mgr.nameEn):'—')}</b> · ${wh.items.length} ${ar?'مادة':'items'} · ${movements.length} ${ar?'حركة':'movements'}</div>
           </div>
           <div class="flex" style="gap:18px;font-size:11.5px">
             <div><div class="text-mute">${ar?'إجمالي المخزون':'Total Stock'}</div><div class="mono" style="font-size:16px;font-weight:700">${fmt.num(totalQty)}</div></div>
@@ -2660,20 +2678,129 @@ View.warehouses = function() {
             <div><div class="text-mute">${ar?'متاح':'Available'}</div><div class="mono" style="font-size:16px;font-weight:700;color:var(--emerald)">${fmt.num(totalQty - totalAlloc)}</div></div>
           </div>
         </div>
+
+        ${canEdit ? `
+        <div class="flex" style="gap:8px;margin-bottom:14px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" onclick="Action.newWHItem('${wh.id}')">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+            ${ar?'مادة جديدة':'New Material'}
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="Action.receiveStock('${wh.id}')" ${wh.items.length === 0 ? 'disabled' : ''}>
+            ↓ ${ar?'استلام شحنة':'Receive Stock'}
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="Action.issueStock('${wh.id}')" ${wh.items.length === 0 ? 'disabled' : ''}>
+            ↑ ${ar?'صرف':'Issue Stock'}
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="Action.adjustStock('${wh.id}')" ${wh.items.length === 0 ? 'disabled' : ''}>
+            ⚙ ${ar?'تعديل / جرد':'Adjust / Audit'}
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="View.whMovements('${wh.id}')" ${movements.length === 0 ? 'disabled' : ''}>
+            📋 ${ar?'سجل الحركة':'Movement Log'} (${movements.length})
+          </button>
+        </div>
+        ` : ''}
+
         <div style="overflow-x:auto"><table class="data">
-          <thead><tr><th>SKU</th><th>${ar?'الصنف':'Item'}</th><th>${ar?'الكمية':'Qty'}</th><th>${ar?'مخصص':'Allocated'}</th><th>${ar?'متاح':'Available'}</th><th>${ar?'الوحدة':'Unit'}</th></tr></thead>
-          <tbody>${wh.items.map(it => `<tr>
-            <td class="mono">${escapeHTML(it.sku)}</td>
-            <td>${escapeHTML(it.name)}</td>
-            <td class="mono">${fmt.num(it.qty)}</td>
-            <td class="mono text-mute">${fmt.num(it.allocated)}</td>
-            <td class="mono text-emerald">${fmt.num(it.qty - it.allocated)}</td>
-            <td class="text-mute">${escapeHTML(it.unit)}</td>
-          </tr>`).join('')}</tbody>
+          <thead><tr>
+            <th>${ar?'الكود (SKU)':'Code (SKU)'}</th>
+            <th>${ar?'الصنف':'Item'}</th>
+            <th>${ar?'الكمية':'Qty'}</th>
+            <th>${ar?'مخصص':'Allocated'}</th>
+            <th>${ar?'متاح':'Available'}</th>
+            <th>${ar?'الوحدة':'Unit'}</th>
+            <th>${ar?'الحد الأدنى':'Min'}</th>
+            <th>${ar?'الحالة':'Status'}</th>
+            ${canEdit ? `<th></th>` : ''}
+          </tr></thead>
+          <tbody>${wh.items.length === 0 ? `<tr><td colspan="${canEdit?9:8}" class="empty-state">${ar?'لا توجد مواد بعد — اضغط "مادة جديدة" لإضافة أول مادة':'No materials yet — click "New Material" to add your first item'}</td></tr>` :
+            wh.items.map(it => {
+              const avail = it.qty - it.allocated;
+              const lowStock = it.minQty && it.qty <= it.minQty;
+              const noStock = it.qty === 0;
+              const statusClass = noStock ? 'b-rejected' : lowStock ? 'b-progress' : 'b-completed';
+              const statusText = noStock ? (ar?'فارغ':'Empty') : lowStock ? (ar?'منخفض':'Low') : (ar?'متوفر':'Available');
+              return `<tr>
+                <td class="mono"><b>${escapeHTML(it.sku)}</b></td>
+                <td>${escapeHTML(it.name)}</td>
+                <td class="mono">${fmt.num(it.qty)}</td>
+                <td class="mono text-mute">${fmt.num(it.allocated)}</td>
+                <td class="mono" style="color:${avail<=0?'var(--rose)':'var(--emerald)'}">${fmt.num(avail)}</td>
+                <td class="text-mute">${escapeHTML(it.unit)}</td>
+                <td class="mono text-mute">${it.minQty ? fmt.num(it.minQty) : '—'}</td>
+                <td><span class="badge-status ${statusClass}">${statusText}</span></td>
+                ${canEdit ? `<td>
+                  <button class="btn btn-sm btn-secondary" onclick="Action.viewItemHistory('${wh.id}','${it.sku}')" title="${ar?'سجل المادة':'Item history'}">📜</button>
+                  ${(!it.openingBalanceSet) ? `<button class="btn btn-sm btn-primary" onclick="Action.openingBalance('${wh.id}','${it.sku}')" title="${ar?'رصيد افتتاحي':'Opening balance'}">📦</button>` : ''}
+                </td>` : ''}
+              </tr>`;
+            }).join('')
+          }</tbody>
         </table></div>
+
+        ${recentMoves.length > 0 ? `
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+          <div style="font-size:11px;color:var(--text-3);margin-bottom:8px;font-weight:600">${ar?'آخر 5 حركات':'Last 5 movements'}</div>
+          ${recentMoves.map(m => {
+            const u = Q.user(m.user);
+            const item = wh.items.find(i => i.sku === m.sku);
+            const typeLabels = { opening:ar?'رصيد افتتاحي':'Opening', receive:ar?'استلام':'Receive', issue:ar?'صرف':'Issue', adjust:ar?'تعديل':'Adjust', return:ar?'مرتجع':'Return' };
+            const sign = ['receive','opening','return'].includes(m.type) ? '+' : (m.type === 'adjust' ? '±' : '−');
+            const color = sign === '+' ? 'var(--emerald)' : sign === '−' ? 'var(--rose)' : 'var(--amber)';
+            return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;font-size:11.5px;border-bottom:1px solid rgba(255,255,255,0.03)">
+              <span style="color:${color};font-weight:700;width:20px">${sign}</span>
+              <span class="mono" style="color:${color};min-width:55px">${fmt.num(Math.abs(m.qty))}</span>
+              <span class="text-mute" style="min-width:55px">${escapeHTML(typeLabels[m.type]||m.type)}</span>
+              <span class="mono" style="font-size:10.5px;min-width:90px">${escapeHTML(m.sku)}</span>
+              <span style="flex:1">${escapeHTML(item?.name||'—')}</span>
+              <span class="text-mute" style="font-size:10.5px">${u?escapeHTML(ar?u.name.split(' ')[0]:u.nameEn.split(' ')[0]):'—'}</span>
+              <span class="text-mute mono" style="font-size:10px">${fmt.ago(m.ts)}</span>
+            </div>`;
+          }).join('')}
+        </div>
+        ` : ''}
       </div>`;
     }).join('')}
   `;
+};
+
+// View movement history of a single warehouse
+View.whMovements = function(whId) {
+  const wh = Q.wh(whId);
+  if (!wh) return;
+  const ar = State.lang === 'ar';
+  const movements = (State.data.stockMovements || []).filter(m => m.whId === whId);
+  const typeLabels = { opening:ar?'رصيد افتتاحي':'Opening', receive:ar?'استلام':'Receive', issue:ar?'صرف':'Issue', adjust:ar?'تعديل':'Adjust', return:ar?'مرتجع':'Return' };
+
+  const body = movements.length === 0 ? `<div class="empty-state">${ar?'لا توجد حركات':'No movements yet'}</div>` : `
+    <div style="overflow-x:auto;max-height:60vh"><table class="data">
+      <thead><tr>
+        <th>${ar?'التاريخ':'Date'}</th>
+        <th>${ar?'النوع':'Type'}</th>
+        <th>${ar?'الكود':'SKU'}</th>
+        <th>${ar?'الكمية':'Qty'}</th>
+        <th>${ar?'المرجع':'Reference'}</th>
+        <th>${ar?'المنفّذ':'By'}</th>
+        <th>${ar?'ملاحظات':'Notes'}</th>
+      </tr></thead>
+      <tbody>${movements.map(m => {
+        const u = Q.user(m.user);
+        const sign = ['receive','opening','return'].includes(m.type) ? '+' : (m.type === 'adjust' ? '±' : '−');
+        const color = sign === '+' ? 'var(--emerald)' : sign === '−' ? 'var(--rose)' : 'var(--amber)';
+        return `<tr>
+          <td class="mono" style="font-size:10.5px">${fmt.date(m.ts)}</td>
+          <td><span class="badge-status">${escapeHTML(typeLabels[m.type]||m.type)}</span></td>
+          <td class="mono">${escapeHTML(m.sku)}</td>
+          <td class="mono" style="color:${color};font-weight:700">${sign}${fmt.num(Math.abs(m.qty))}</td>
+          <td class="text-mute">${escapeHTML(m.ref||'—')}</td>
+          <td>${u?escapeHTML(ar?u.name:u.nameEn):'—'}</td>
+          <td class="text-mute" style="font-size:11px">${escapeHTML(m.notes||'—')}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+  `;
+
+  App.openModal(`${ar?'سجل حركة المستودع':'Warehouse Movement Log'} — ${escapeHTML(wh.code)}`, body,
+    `<button class="btn btn-secondary" onclick="App.closeModal()">${ar?'إغلاق':'Close'}</button>`, true);
 };
 
 // ─────── QUALITY (MOC) ───────
@@ -3662,6 +3789,462 @@ const Action = {
   },
 
   // ─────── BACKUP ───────
+  // ─────── WAREHOUSE STOCK ACTIONS ───────
+
+  _whCanEdit(wh) {
+    return Perm.isManager() || State.user.dept === wh.dept;
+  },
+
+  _whUnits() {
+    return ['pcs', 'kg', 'g', 'L', 'mL', 'roll', 'box', 'm', 'm²', 'set', 'pair'];
+  },
+
+  // Form: Add new material (SKU + name only — no quantity yet)
+  newWHItem(whId) {
+    const wh = Q.wh(whId);
+    if (!wh) return;
+    if (!this._whCanEdit(wh)) { toast(t('no_perm'), 'error'); return; }
+    const ar = State.lang === 'ar';
+    const unitOpts = this._whUnits().map(u => `<option value="${u}">${u}</option>`).join('');
+    const body = `
+      <div style="background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:9px;padding:10px;margin-bottom:14px;font-size:11.5px;color:var(--sky)">
+        ℹ ${ar?`إضافة مادة جديدة لمستودع ${wh.code} — الكود لا يمكن تغييره بعد الإنشاء`:`Adding new material to ${wh.code} — SKU cannot be changed after creation`}
+      </div>
+      <div class="form-grid">
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'كود المادة (SKU)':'Material Code (SKU)'} <span class="req">*</span></label>
+            <input id="whSku" class="mono" placeholder="${ar?'مثال: PC-COVER-A':'e.g. PC-COVER-A'}" maxlength="40" autocomplete="off">
+            <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">${ar?'يجب أن يكون فريداً — حروف، أرقام، شرطات':'Must be unique — letters, numbers, dashes'}</div>
+          </div>
+          <div class="field">
+            <label>${ar?'الوحدة':'Unit'} <span class="req">*</span></label>
+            <select id="whUnit">${unitOpts}</select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'الاسم بالعربي':'Name (AR)'} <span class="req">*</span></label>
+            <input id="whName" placeholder="${ar?'غلاف بولي كاربونات':'Polycarbonate Cover'}">
+          </div>
+          <div class="field">
+            <label>${ar?'الاسم بالإنجليزي':'Name (EN)'}</label>
+            <input id="whNameEn" placeholder="${ar?'(اختياري)':'(optional)'}">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'الحد الأدنى للمخزون':'Min Stock Threshold'}</label>
+            <input id="whMin" type="number" min="0" placeholder="${ar?'تنبيه عند النقصان':'Alert when below'}">
+          </div>
+          <div class="field">
+            <label>${ar?'الحد الأقصى':'Max Stock'}</label>
+            <input id="whMax" type="number" min="0" placeholder="${ar?'(اختياري)':'(optional)'}">
+          </div>
+        </div>
+        <div class="field">
+          <label>${ar?'ملاحظات':'Notes'}</label>
+          <textarea id="whNotes" rows="2" placeholder="${ar?'(اختياري)':'(optional)'}"></textarea>
+        </div>
+      </div>
+    `;
+    App.openModal(`${ar?'مادة جديدة':'New Material'} — ${wh.code}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.saveNewWHItem('${whId}')">${ar?'إضافة المادة':'Add Material'}</button>`, true);
+  },
+
+  saveNewWHItem(whId) {
+    const wh = Q.wh(whId);
+    if (!wh || !this._whCanEdit(wh)) return;
+    const ar = State.lang === 'ar';
+    const get = (id) => (document.getElementById(id)?.value || '').trim();
+    const sku = get('whSku').toUpperCase();
+    const name = get('whName');
+    const nameEn = get('whNameEn') || name;
+    const unit = get('whUnit');
+    const minQty = parseFloat(get('whMin')) || 0;
+    const maxQty = parseFloat(get('whMax')) || 0;
+    const notes = get('whNotes');
+
+    if (!sku || !name || !unit) {
+      toast(ar?'املأ الحقول المطلوبة':'Fill required fields','error');
+      return;
+    }
+    if (!/^[A-Z0-9\-_]+$/.test(sku)) {
+      toast(ar?'الكود يحتوي على رموز غير مسموحة':'SKU has invalid characters','error');
+      return;
+    }
+    // Check uniqueness across ALL warehouses
+    const existing = State.data.warehouses.some(w => w.items.some(i => i.sku === sku));
+    if (existing) {
+      toast(ar?`الكود ${sku} موجود مسبقاً في النظام`:`SKU ${sku} already exists`,'error');
+      return;
+    }
+
+    wh.items.push({
+      sku, name, nameEn, unit,
+      qty: 0, allocated: 0,
+      minQty, maxQty,
+      notes,
+      openingBalanceSet: false,
+      createdAt: now(), createdBy: State.user.id,
+    });
+    Audit.log('add_material', 'Warehouse', `${whId}/${sku}`, { name, unit, minQty });
+    Movements.add('info', `${ar?'مادة جديدة في':'New material in'} ${wh.code}: ${sku} — ${name}`, { whId, sku });
+    State.save();
+    App.closeModal();
+    toast(ar?`✓ تم إضافة ${sku}`:`✓ Added ${sku}`, 'success');
+    View.warehouses();
+  },
+
+  // Form: Set opening balance (one-time per item)
+  openingBalance(whId, sku) {
+    const wh = Q.wh(whId);
+    if (!wh || !this._whCanEdit(wh)) { toast(t('no_perm'), 'error'); return; }
+    const item = wh.items.find(i => i.sku === sku);
+    if (!item) return;
+    if (item.openingBalanceSet) {
+      toast(State.lang==='ar'?'الرصيد الافتتاحي مسجَّل مسبقاً — استخدم تعديل/جرد':'Opening balance already set — use Adjust','error');
+      return;
+    }
+    const ar = State.lang === 'ar';
+    const body = `
+      <div style="background:rgba(245,185,66,0.08);border:1px solid rgba(245,185,66,0.25);border-radius:9px;padding:11px;margin-bottom:14px;font-size:11.5px">
+        📦 <b style="color:var(--gold)">${ar?'رصيد افتتاحي':'Opening Balance'}</b>
+        <div style="margin-top:4px;color:var(--text-2)">${ar?'سجّل الكمية الفعلية الموجودة الآن في المخزن. هذي العملية تُسجّل مرة واحدة فقط لكل مادة.':'Record the actual quantity currently in stock. This is recorded only once per material.'}</div>
+      </div>
+      <div class="form-grid">
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'المادة':'Material'}</label>
+            <input value="${escapeHTML(sku)} — ${escapeHTML(item.name)}" readonly class="mono">
+          </div>
+          <div class="field">
+            <label>${ar?'الوحدة':'Unit'}</label>
+            <input value="${escapeHTML(item.unit)}" readonly>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'الكمية المتوفرة فعلياً':'Actual Quantity'} <span class="req">*</span></label>
+            <input id="obQty" type="number" min="0" step="any" placeholder="${ar?'أدخل الكمية الفعلية':'Enter actual qty'}">
+          </div>
+          <div class="field">
+            <label>${ar?'تاريخ الجرد':'Audit Date'}</label>
+            <input id="obDate" type="date" value="${new Date().toISOString().split('T')[0]}">
+          </div>
+        </div>
+        <div class="field">
+          <label>${ar?'مصدر/مرجع الجرد':'Source / Reference'}</label>
+          <input id="obRef" placeholder="${ar?'مثال: جرد فعلي 28-04-2026':'e.g. Physical count 2026-04-28'}">
+        </div>
+        <div class="field">
+          <label>${ar?'ملاحظات':'Notes'}</label>
+          <textarea id="obNotes" rows="2" placeholder="${ar?'حالة المادة، موقعها، أي ملاحظات':'Condition, location, any notes'}"></textarea>
+        </div>
+      </div>
+    `;
+    App.openModal(`${ar?'رصيد افتتاحي':'Opening Balance'} — ${escapeHTML(sku)}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.saveOpeningBalance('${whId}','${sku}')">${ar?'تسجيل الرصيد':'Set Balance'}</button>`, true);
+  },
+
+  saveOpeningBalance(whId, sku) {
+    const wh = Q.wh(whId);
+    const item = wh?.items.find(i => i.sku === sku);
+    if (!item || !this._whCanEdit(wh)) return;
+    const ar = State.lang === 'ar';
+    const qty = parseFloat(document.getElementById('obQty').value);
+    const ref = document.getElementById('obRef').value.trim() || (ar?'رصيد افتتاحي':'Opening balance');
+    const notes = document.getElementById('obNotes').value.trim();
+    if (isNaN(qty) || qty < 0) { toast(ar?'أدخل كمية صحيحة':'Enter valid quantity','error'); return; }
+
+    item.qty = qty;
+    item.openingBalanceSet = true;
+    item.openingBalanceAt = now();
+    item.openingBalanceBy = State.user.id;
+
+    Movements.addStock({ whId, sku, type: 'opening', qty, ref, notes });
+    Audit.log('opening_balance', 'Warehouse', `${whId}/${sku}`, { qty, ref });
+    Movements.add('info', `📦 ${ar?'رصيد افتتاحي':'Opening balance'}: ${wh.code}/${sku} = ${fmt.num(qty)} ${item.unit}`, { whId, sku, qty });
+    State.save();
+    App.closeModal();
+    toast(ar?`✓ تم تسجيل الرصيد: ${fmt.num(qty)} ${item.unit}`:`✓ Balance set: ${fmt.num(qty)} ${item.unit}`, 'success');
+    View.warehouses();
+  },
+
+  // Form: Receive shipment (incoming stock)
+  receiveStock(whId, presetSku) {
+    const wh = Q.wh(whId);
+    if (!wh || !this._whCanEdit(wh)) { toast(t('no_perm'), 'error'); return; }
+    if (wh.items.length === 0) { toast(State.lang==='ar'?'لا توجد مواد — أضف أولاً':'No materials — add one first','error'); return; }
+    const ar = State.lang === 'ar';
+    const itemOpts = wh.items.map(i => `<option value="${i.sku}" ${presetSku===i.sku?'selected':''}>${escapeHTML(i.sku)} — ${escapeHTML(i.name)} (${i.unit})</option>`).join('');
+    const body = `
+      <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.25);border-radius:9px;padding:10px;margin-bottom:14px;font-size:11.5px;color:var(--emerald)">
+        ↓ <b>${ar?'استلام شحنة جديدة':'Receive New Shipment'}</b> — ${ar?'يضيف الكمية للمخزون الحالي':'Adds quantity to current stock'}
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label>${ar?'المادة':'Material'} <span class="req">*</span></label>
+          <select id="rcSku">${itemOpts}</select>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'الكمية المستلمة':'Quantity Received'} <span class="req">*</span></label>
+            <input id="rcQty" type="number" min="0" step="any" placeholder="${ar?'الكمية':'Qty'}">
+          </div>
+          <div class="field">
+            <label>${ar?'رقم الفاتورة / الإذن':'Invoice / Receipt #'} <span class="req">*</span></label>
+            <input id="rcRef" placeholder="${ar?'INV-2026-0123':'INV-2026-0123'}">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'المورد':'Supplier'}</label>
+            <input id="rcSupplier" placeholder="${ar?'(اختياري)':'(optional)'}">
+          </div>
+          <div class="field">
+            <label>${ar?'تاريخ الاستلام':'Receipt Date'}</label>
+            <input id="rcDate" type="date" value="${new Date().toISOString().split('T')[0]}">
+          </div>
+        </div>
+        <div class="field">
+          <label>${ar?'ملاحظات':'Notes'}</label>
+          <textarea id="rcNotes" rows="2" placeholder="${ar?'حالة الشحنة، الفحص، إلخ':'Shipment condition, inspection, etc.'}"></textarea>
+        </div>
+      </div>
+    `;
+    App.openModal(`${ar?'استلام شحنة':'Receive Stock'} — ${wh.code}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.saveReceive('${whId}')">${ar?'تسجيل الاستلام':'Save Receipt'}</button>`, true);
+  },
+
+  saveReceive(whId) {
+    const wh = Q.wh(whId);
+    if (!wh || !this._whCanEdit(wh)) return;
+    const ar = State.lang === 'ar';
+    const sku = document.getElementById('rcSku').value;
+    const qty = parseFloat(document.getElementById('rcQty').value);
+    const ref = document.getElementById('rcRef').value.trim();
+    const supplier = document.getElementById('rcSupplier').value.trim();
+    const notes = document.getElementById('rcNotes').value.trim();
+    const item = wh.items.find(i => i.sku === sku);
+    if (!item) return;
+    if (isNaN(qty) || qty <= 0) { toast(ar?'أدخل كمية موجبة':'Enter positive qty','error'); return; }
+    if (!ref) { toast(ar?'رقم الفاتورة مطلوب':'Reference required','error'); return; }
+
+    item.qty += qty;
+    Movements.addStock({ whId, sku, type: 'receive', qty, ref, notes: supplier ? `${supplier} | ${notes}` : notes });
+    Audit.log('receive_stock', 'Warehouse', `${whId}/${sku}`, { qty, ref, supplier });
+    Movements.add('ok', `↓ ${ar?'استلام':'Receive'}: ${wh.code}/${sku} +${fmt.num(qty)} ${item.unit} (${ref})`, { whId, sku, qty });
+    State.save();
+    App.closeModal();
+    toast(ar?`✓ تم الاستلام: +${fmt.num(qty)} ${item.unit}`:`✓ Received: +${fmt.num(qty)} ${item.unit}`, 'success');
+    View.warehouses();
+  },
+
+  // Form: Issue stock (outgoing — to production or other warehouse)
+  issueStock(whId) {
+    const wh = Q.wh(whId);
+    if (!wh || !this._whCanEdit(wh)) { toast(t('no_perm'), 'error'); return; }
+    if (wh.items.length === 0 || wh.items.every(i => i.qty - i.allocated <= 0)) {
+      toast(State.lang==='ar'?'لا توجد كميات متاحة للصرف':'No available stock to issue','error');
+      return;
+    }
+    const ar = State.lang === 'ar';
+    const itemOpts = wh.items.filter(i => i.qty - i.allocated > 0).map(i =>
+      `<option value="${i.sku}">${escapeHTML(i.sku)} — ${escapeHTML(i.name)} · ${ar?'متاح:':'avail:'} ${fmt.num(i.qty-i.allocated)} ${i.unit}</option>`
+    ).join('');
+    const body = `
+      <div style="background:rgba(244,63,94,0.06);border:1px solid rgba(244,63,94,0.25);border-radius:9px;padding:10px;margin-bottom:14px;font-size:11.5px;color:var(--rose)">
+        ↑ <b>${ar?'صرف من المخزن':'Issue Stock'}</b> — ${ar?'يخصم من الكمية المتاحة':'Deducts from available stock'}
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label>${ar?'المادة':'Material'} <span class="req">*</span></label>
+          <select id="isSku">${itemOpts}</select>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'الكمية المصروفة':'Quantity to Issue'} <span class="req">*</span></label>
+            <input id="isQty" type="number" min="0" step="any">
+          </div>
+          <div class="field">
+            <label>${ar?'مرجع الصرف':'Issue Reference'} <span class="req">*</span></label>
+            <input id="isRef" placeholder="${ar?'مثال: WO-2026-0001':'e.g. WO-2026-0001'}">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'الوجهة':'Destination'}</label>
+            <input id="isDest" placeholder="${ar?'الإنتاج / مستودع آخر':'Production / other WH'}">
+          </div>
+          <div class="field">
+            <label>${ar?'تاريخ الصرف':'Issue Date'}</label>
+            <input id="isDate" type="date" value="${new Date().toISOString().split('T')[0]}">
+          </div>
+        </div>
+        <div class="field">
+          <label>${ar?'ملاحظات':'Notes'}</label>
+          <textarea id="isNotes" rows="2"></textarea>
+        </div>
+      </div>
+    `;
+    App.openModal(`${ar?'صرف مخزون':'Issue Stock'} — ${wh.code}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-danger" onclick="Action.saveIssue('${whId}')">${ar?'تأكيد الصرف':'Confirm Issue'}</button>`, true);
+  },
+
+  saveIssue(whId) {
+    const wh = Q.wh(whId);
+    if (!wh || !this._whCanEdit(wh)) return;
+    const ar = State.lang === 'ar';
+    const sku = document.getElementById('isSku').value;
+    const qty = parseFloat(document.getElementById('isQty').value);
+    const ref = document.getElementById('isRef').value.trim();
+    const dest = document.getElementById('isDest').value.trim();
+    const notes = document.getElementById('isNotes').value.trim();
+    const item = wh.items.find(i => i.sku === sku);
+    if (!item) return;
+    if (isNaN(qty) || qty <= 0) { toast(ar?'أدخل كمية موجبة':'Enter positive qty','error'); return; }
+    if (!ref) { toast(ar?'مرجع الصرف مطلوب':'Reference required','error'); return; }
+    const avail = item.qty - item.allocated;
+    if (qty > avail) { toast(ar?`الكمية أكبر من المتاح (${fmt.num(avail)})`:`Exceeds available (${fmt.num(avail)})`,'error'); return; }
+
+    item.qty -= qty;
+    Movements.addStock({ whId, sku, type: 'issue', qty, ref, notes: dest ? `→ ${dest} | ${notes}` : notes });
+    Audit.log('issue_stock', 'Warehouse', `${whId}/${sku}`, { qty, ref, dest });
+    Movements.add('warn', `↑ ${ar?'صرف':'Issue'}: ${wh.code}/${sku} −${fmt.num(qty)} ${item.unit} → ${dest||ref}`, { whId, sku, qty });
+    State.save();
+    App.closeModal();
+    toast(ar?`✓ تم الصرف: −${fmt.num(qty)} ${item.unit}`:`✓ Issued: −${fmt.num(qty)} ${item.unit}`, 'success');
+    View.warehouses();
+  },
+
+  // Form: Adjust stock (audit / correction)
+  adjustStock(whId) {
+    const wh = Q.wh(whId);
+    if (!wh || !this._whCanEdit(wh)) { toast(t('no_perm'), 'error'); return; }
+    if (wh.items.length === 0) return;
+    const ar = State.lang === 'ar';
+    const itemOpts = wh.items.map(i =>
+      `<option value="${i.sku}">${escapeHTML(i.sku)} — ${escapeHTML(i.name)} · ${ar?'الحالي:':'current:'} ${fmt.num(i.qty)} ${i.unit}</option>`
+    ).join('');
+    const body = `
+      <div style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.25);border-radius:9px;padding:10px;margin-bottom:14px;font-size:11.5px;color:var(--amber)">
+        ⚙ <b>${ar?'تعديل / جرد':'Adjustment / Audit'}</b> — ${ar?'تصحيح الكمية بعد جرد فعلي':'Correct quantity after physical count'}
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label>${ar?'المادة':'Material'} <span class="req">*</span></label>
+          <select id="adSku" onchange="Action._adjustSyncCurrent()">${itemOpts}</select>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'الكمية الحالية في النظام':'Current System Qty'}</label>
+            <input id="adCurrent" readonly class="mono">
+          </div>
+          <div class="field">
+            <label>${ar?'الكمية الفعلية بعد الجرد':'Actual Qty After Audit'} <span class="req">*</span></label>
+            <input id="adNew" type="number" min="0" step="any">
+          </div>
+        </div>
+        <div class="field">
+          <label>${ar?'سبب التعديل':'Reason for Adjustment'} <span class="req">*</span></label>
+          <input id="adReason" placeholder="${ar?'مثال: جرد فعلي ربعي، تالف، مفقود':'e.g. Quarterly count, damaged, missing'}">
+        </div>
+        <div class="field">
+          <label>${ar?'ملاحظات':'Notes'}</label>
+          <textarea id="adNotes" rows="2"></textarea>
+        </div>
+      </div>
+    `;
+    App.openModal(`${ar?'تعديل المخزون':'Stock Adjustment'} — ${wh.code}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.saveAdjust('${whId}')">${ar?'حفظ التعديل':'Save Adjustment'}</button>`, true);
+    setTimeout(() => this._adjustSyncCurrent(), 50);
+  },
+
+  _adjustSyncCurrent() {
+    const sel = document.getElementById('adSku');
+    const cur = document.getElementById('adCurrent');
+    if (!sel || !cur) return;
+    const wh = State.data.warehouses.find(w => w.items.some(i => i.sku === sel.value));
+    const item = wh?.items.find(i => i.sku === sel.value);
+    if (item) cur.value = `${fmt.num(item.qty)} ${item.unit}`;
+  },
+
+  saveAdjust(whId) {
+    const wh = Q.wh(whId);
+    if (!wh || !this._whCanEdit(wh)) return;
+    const ar = State.lang === 'ar';
+    const sku = document.getElementById('adSku').value;
+    const newQty = parseFloat(document.getElementById('adNew').value);
+    const reason = document.getElementById('adReason').value.trim();
+    const notes = document.getElementById('adNotes').value.trim();
+    const item = wh.items.find(i => i.sku === sku);
+    if (!item) return;
+    if (isNaN(newQty) || newQty < 0) { toast(ar?'أدخل كمية صحيحة':'Enter valid qty','error'); return; }
+    if (!reason) { toast(ar?'سبب التعديل مطلوب':'Reason required','error'); return; }
+
+    const diff = newQty - item.qty;
+    if (diff === 0) { toast(ar?'لا يوجد فرق':'No change','info'); return; }
+    item.qty = newQty;
+    Movements.addStock({ whId, sku, type: 'adjust', qty: diff, ref: reason, notes });
+    Audit.log('adjust_stock', 'Warehouse', `${whId}/${sku}`, { from: item.qty - diff, to: newQty, reason });
+    Movements.add('warn', `⚙ ${ar?'تعديل':'Adjust'}: ${wh.code}/${sku} ${diff>0?'+':''}${fmt.num(diff)} ${item.unit} (${reason})`, { whId, sku, diff });
+    State.save();
+    App.closeModal();
+    toast(ar?`✓ تم التعديل: ${diff>0?'+':''}${fmt.num(diff)} ${item.unit}`:`✓ Adjusted: ${diff>0?'+':''}${fmt.num(diff)} ${item.unit}`, 'success');
+    View.warehouses();
+  },
+
+  // View item-specific history
+  viewItemHistory(whId, sku) {
+    const wh = Q.wh(whId);
+    const item = wh?.items.find(i => i.sku === sku);
+    if (!item) return;
+    const ar = State.lang === 'ar';
+    const movements = (State.data.stockMovements || []).filter(m => m.whId === whId && m.sku === sku);
+    const typeLabels = { opening:ar?'رصيد افتتاحي':'Opening', receive:ar?'استلام':'Receive', issue:ar?'صرف':'Issue', adjust:ar?'تعديل':'Adjust', return:ar?'مرتجع':'Return' };
+
+    const body = `
+      <div style="background:var(--glass-2);padding:11px;border-radius:8px;margin-bottom:14px;font-size:12px">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div><span class="text-mute">${ar?'الكود:':'SKU:'}</span> <b class="mono">${escapeHTML(sku)}</b></div>
+          <div><span class="text-mute">${ar?'الكمية الحالية:':'Current:'}</span> <b class="mono">${fmt.num(item.qty)} ${item.unit}</b></div>
+          <div><span class="text-mute">${ar?'مخصص:':'Allocated:'}</span> <b class="mono" style="color:var(--amber)">${fmt.num(item.allocated)}</b></div>
+          <div><span class="text-mute">${ar?'متاح:':'Available:'}</span> <b class="mono" style="color:var(--emerald)">${fmt.num(item.qty-item.allocated)}</b></div>
+        </div>
+      </div>
+      ${movements.length === 0 ? `<div class="empty-state">${ar?'لا توجد حركات لهذي المادة':'No movements for this item'}</div>` : `
+      <div style="overflow-x:auto;max-height:50vh"><table class="data">
+        <thead><tr>
+          <th>${ar?'التاريخ':'Date'}</th>
+          <th>${ar?'النوع':'Type'}</th>
+          <th>${ar?'الكمية':'Qty'}</th>
+          <th>${ar?'المرجع':'Reference'}</th>
+          <th>${ar?'المنفّذ':'By'}</th>
+        </tr></thead>
+        <tbody>${movements.map(m => {
+          const u = Q.user(m.user);
+          const sign = ['receive','opening','return'].includes(m.type) ? '+' : (m.type === 'adjust' ? (m.qty>=0?'+':'') : '−');
+          const color = m.qty > 0 ? 'var(--emerald)' : m.qty < 0 ? 'var(--rose)' : 'var(--amber)';
+          return `<tr>
+            <td class="mono" style="font-size:10.5px">${fmt.date(m.ts)}</td>
+            <td><span class="badge-status">${escapeHTML(typeLabels[m.type]||m.type)}</span></td>
+            <td class="mono" style="color:${color};font-weight:700">${sign}${fmt.num(Math.abs(m.qty))}</td>
+            <td class="text-mute">${escapeHTML(m.ref||'—')}</td>
+            <td>${u?escapeHTML(ar?u.name:u.nameEn):'—'}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>`}
+    `;
+    App.openModal(`${ar?'سجل حركة المادة':'Item History'} — ${escapeHTML(sku)}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${ar?'إغلاق':'Close'}</button>`, true);
+  },
+
   exportData() {
     const payload = {
       _meta: { exportedAt: now(), exportedBy: State.user.id, version: '1.0', source: 'ProdLine OS' },
