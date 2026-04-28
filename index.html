@@ -1401,6 +1401,31 @@ const Seed = {
       stockMovements: [],
       suppliers: [],
       maintenanceRequests: [],
+      // Phase 2: BOM (Bill of Materials) per station
+      // Maps stationId → array of materials with per-unit quantities
+      // qtyPerUnit = how much material is needed for ONE finished unit
+      bom: {
+        K1: [
+          { sku: 'PC-SHEET-A4', name: 'PC Sheet A4', nameEn: 'PC Sheet A4', whId: 'WH-RAW', qtyPerUnit: 2, unit: 'sheet', recoverable: false },
+          { sku: 'PC-COVER',    name: 'غلاف PC',     nameEn: 'PC Cover',    whId: 'WH-RAW', qtyPerUnit: 1, unit: 'pc',    recoverable: false },
+        ],
+        K2: [
+          { sku: 'OVERLAY-FILM', name: 'طبقة شفافة',  nameEn: 'Overlay Film', whId: 'WH-RAW', qtyPerUnit: 1, unit: 'pc',    recoverable: false },
+          { sku: 'ADHESIVE',     name: 'لاصق',         nameEn: 'Adhesive',     whId: 'WH-RAW', qtyPerUnit: 0.5, unit: 'g',  recoverable: false },
+        ],
+        K3: [
+          { sku: 'GOLD-FOIL',    name: 'شريط ذهبي',    nameEn: 'Gold Foil',    whId: 'WH-RAW', qtyPerUnit: 0.05, unit: 'g', recoverable: true,  recoveryRate: 0.95 },
+          { sku: 'PUNCH-DIE',    name: 'قالب القطع',  nameEn: 'Punch Die',    whId: 'WH-RAW', qtyPerUnit: 0.001, unit: 'pc', recoverable: false },
+        ],
+        K4: [
+          { sku: 'CHIP-SLE77',   name: 'شريحة',        nameEn: 'Chip',         whId: 'WH-RAW', qtyPerUnit: 1, unit: 'pc',   recoverable: false },
+          { sku: 'ANTENNA',      name: 'هوائي',        nameEn: 'Antenna',      whId: 'WH-RAW', qtyPerUnit: 1, unit: 'pc',   recoverable: false },
+          { sku: 'BOOKLET-COV',  name: 'غلاف الكتيب', nameEn: 'Booklet Cover', whId: 'WH-RAW', qtyPerUnit: 1, unit: 'pc',  recoverable: false },
+        ],
+      },
+      // Track material consumption per WO per station (audit + scrap calc)
+      // Each entry: { woId, stationId, sku, qtyConsumed, ts, by }
+      stationConsumption: [],
       committee: {
         members: [],
         requiredApprovals: 3,
@@ -1755,6 +1780,66 @@ const Repo = {
   },
 
   // ═══════════════════════════════════════════════════════════════════
+  // BOM (Bill of Materials) — recipe per station
+  // Stored as JSONB rows: one row per station_id (K1, K2, K3, K4)
+  // ═══════════════════════════════════════════════════════════════════
+  bom: {
+    async list() {
+      if (!sb) return null;
+      const { data, error } = await sb.from('bom').select('*');
+      if (error) { Repo._err('bom.list', error); return null; }
+      Repo._ok('bom.list');
+      const map = {};
+      (data || []).forEach(r => { map[r.station_id] = r.materials || []; });
+      return map;
+    },
+    async upsertStation(stationId, materials) {
+      if (!sb) return false;
+      const { error } = await sb.from('bom').upsert({
+        station_id: stationId,
+        materials: materials || [],
+        updated_by: State.user?.id || null,
+      }, { onConflict: 'station_id' });
+      if (error) { Repo._err('bom.upsertStation', error); return false; }
+      Repo._ok('bom.upsertStation');
+      return true;
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // STATION CONSUMPTION (immutable audit of materials consumed per WO/station)
+  // ═══════════════════════════════════════════════════════════════════
+  stationConsumption: {
+    async list(limit = 1000) {
+      if (!sb) return null;
+      const { data, error } = await sb.from('station_consumption').select('*').order('created_at', { ascending: false }).limit(limit);
+      if (error) { Repo._err('stationConsumption.list', error); return null; }
+      Repo._ok('stationConsumption.list');
+      return (data || []).map(r => ({
+        id: r.id, woId: r.wo_id, stationId: r.station_id, sku: r.sku,
+        whId: r.warehouse_id, qtyConsumed: r.qty_consumed,
+        qtyPerUnit: r.qty_per_unit, unitsAtConsumption: r.units_at_consumption,
+        unit: r.unit, recoverable: !!r.recoverable, recoveryRate: r.recovery_rate || 0,
+        ts: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
+        by: r.by_user,
+      }));
+    },
+    async insert(c) {
+      if (!sb) return false;
+      const { error } = await sb.from('station_consumption').insert({
+        id: c.id, wo_id: c.woId, station_id: c.stationId, sku: c.sku,
+        warehouse_id: c.whId, qty_consumed: c.qtyConsumed,
+        qty_per_unit: c.qtyPerUnit, units_at_consumption: c.unitsAtConsumption,
+        unit: c.unit, recoverable: !!c.recoverable, recovery_rate: c.recoveryRate || 0,
+        by_user: c.by || State.user?.id,
+      });
+      if (error) { Repo._err('stationConsumption.insert', error); return false; }
+      Repo._ok('stationConsumption.insert');
+      return true;
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
   // BOOTSTRAP — load all cloud data into State.data on login
   // Called from the auth flow after successful login.
   // ═══════════════════════════════════════════════════════════════════
@@ -1767,7 +1852,7 @@ const Repo = {
     const t0 = Date.now();
 
     try {
-      const [suppliers, maintenance, ccfg, cmembers, creviews, returns, stkMvs] = await Promise.all([
+      const [suppliers, maintenance, ccfg, cmembers, creviews, returns, stkMvs, bomMap, stConsume] = await Promise.all([
         this.suppliers.list(),
         this.maintenance.list(),
         this.committee.getConfig(),
@@ -1775,6 +1860,8 @@ const Repo = {
         this.committee.listReviews(),
         this.returns.list(),
         this.stockMovements.list(500),
+        this.bom.list(),
+        this.stationConsumption.list(1000),
       ]);
 
       if (suppliers !== null) State.data.suppliers = suppliers;
@@ -1791,12 +1878,17 @@ const Repo = {
       if (creviews !== null) State.data.committeeReviews = creviews;
       if (returns !== null) State.data.returns = returns;
       if (stkMvs !== null) State.data.stockMovements = stkMvs;
+      // BOM: only override if cloud has data (preserves seed defaults on first run)
+      if (bomMap !== null && Object.keys(bomMap).length > 0) State.data.bom = bomMap;
+      if (stConsume !== null) State.data.stationConsumption = stConsume;
 
       State.save();
       console.log(`[Repo] Bootstrap complete in ${Date.now() - t0}ms — `, {
         suppliers: suppliers?.length, maintenance: maintenance?.length,
         committeeMembers: cmembers?.length, committeeReviews: creviews?.length,
         returns: returns?.length, stockMovements: stkMvs?.length,
+        bomStations: bomMap ? Object.keys(bomMap).length : 0,
+        stationConsumption: stConsume?.length,
       });
       return true;
     } catch (e) {
@@ -1865,6 +1957,158 @@ const Repo = {
   },
 };
 
+/* ============ BOM ENGINE — Bill of Materials per Station ============ */
+// Handles per-station material consumption from warehouse stock.
+// Lifecycle: WO arrives at K(n) → consume(woId, stationId) → if all materials available
+// → deduct from warehouse + log to stationConsumption + record stock_movement
+//
+// Math:
+//   qty_required[material] = BOM[station][material].qtyPerUnit × wo.remainingQty
+//   wo.remainingQty = wo.qty − Σ scrap_at_previous_stages
+//
+// On scrap: see Scrap module (Phase 3) — material is "consumed-as-scrap", not refunded
+// (except recoverable=true materials like gold, where 95% is logged for recovery).
+
+const BOM = {
+  // Get the BOM for a station (returns array of materials, or [])
+  forStation(stationId) {
+    return (State.data.bom && State.data.bom[stationId]) || [];
+  },
+
+  // Calculate required quantities for a WO at a given station
+  // Returns: [{ sku, name, whId, qtyRequired, qtyAvailable, sufficient, unit }]
+  calculateRequired(woId, stationId) {
+    const wo = Q.wo(woId);
+    if (!wo) return [];
+    const recipe = this.forStation(stationId);
+    if (recipe.length === 0) return [];
+
+    // remainingQty = original qty minus all prior scrap
+    const remaining = (wo.qty || 0) - (wo.scrap || 0);
+    if (remaining <= 0) return [];
+
+    return recipe.map(mat => {
+      const wh = Q.wh(mat.whId);
+      const item = wh ? wh.items.find(i => i.sku === mat.sku) : null;
+      const qtyRequired = +(mat.qtyPerUnit * remaining).toFixed(4);
+      const qtyAvailable = item ? +item.qty.toFixed(4) : 0;
+      return {
+        sku: mat.sku,
+        name: mat.name,
+        nameEn: mat.nameEn,
+        whId: mat.whId,
+        whCode: wh ? wh.code : '?',
+        unit: mat.unit,
+        recoverable: !!mat.recoverable,
+        recoveryRate: mat.recoveryRate || 0,
+        qtyPerUnit: mat.qtyPerUnit,
+        remainingProductQty: remaining,
+        qtyRequired,
+        qtyAvailable,
+        shortage: Math.max(0, +(qtyRequired - qtyAvailable).toFixed(4)),
+        sufficient: qtyAvailable >= qtyRequired,
+        itemExists: !!item,
+      };
+    });
+  },
+
+  // Check if all materials are available before allowing station start
+  // Returns: { ok: boolean, errors: [{ sku, msg }] }
+  validate(woId, stationId) {
+    const required = this.calculateRequired(woId, stationId);
+    if (required.length === 0) return { ok: true, errors: [], required: [] };
+
+    const errors = [];
+    for (const r of required) {
+      if (!r.itemExists) {
+        errors.push({ sku: r.sku, msg: `${State.lang === 'ar' ? 'المادة غير معرّفة في المخزن' : 'Material not registered in warehouse'}: ${r.sku}` });
+      } else if (!r.sufficient) {
+        errors.push({ sku: r.sku, msg: `${State.lang === 'ar' ? 'كمية غير كافية' : 'Insufficient stock'}: ${r.sku} (${State.lang === 'ar' ? 'مطلوب' : 'need'} ${fmt.num(r.qtyRequired)} ${r.unit}, ${State.lang === 'ar' ? 'متوفر' : 'have'} ${fmt.num(r.qtyAvailable)})` });
+      }
+    }
+    return { ok: errors.length === 0, errors, required };
+  },
+
+  // Consume materials: deduct from warehouse + log stock_movement + log stationConsumption
+  // Idempotent: checks if already consumed for this WO+station, skips if yes.
+  // Returns: { ok: boolean, consumed: [{ sku, qty, unit }], error?: string }
+  consume(woId, stationId) {
+    const ar = State.lang === 'ar';
+    const wo = Q.wo(woId);
+    if (!wo) return { ok: false, error: 'WO not found' };
+
+    // Idempotency check — already consumed?
+    const existing = (State.data.stationConsumption || []).filter(
+      c => c.woId === woId && c.stationId === stationId
+    );
+    if (existing.length > 0) {
+      return { ok: true, consumed: existing, alreadyConsumed: true };
+    }
+
+    const v = this.validate(woId, stationId);
+    if (!v.ok) return { ok: false, error: v.errors.map(e => e.msg).join(' | '), errors: v.errors };
+
+    const consumed = [];
+    if (!State.data.stationConsumption) State.data.stationConsumption = [];
+
+    for (const r of v.required) {
+      const wh = Q.wh(r.whId);
+      if (!wh) continue;
+      const item = wh.items.find(i => i.sku === r.sku);
+      if (!item) continue;
+
+      // Deduct from warehouse
+      const before = item.qty;
+      item.qty = +(item.qty - r.qtyRequired).toFixed(4);
+
+      // Log stock movement (immutable audit)
+      Movements.addStock({
+        whId: r.whId,
+        sku: r.sku,
+        type: 'issue',
+        qty: r.qtyRequired,
+        ref: `${woId}/${stationId}`,
+        notes: ar ? `صرف لـ ${stationId} (${woId})` : `Issued to ${stationId} (${woId})`,
+      });
+
+      // Log per-station consumption (for scrap calc later)
+      State.data.stationConsumption.push({
+        id: 'SC-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+        woId, stationId, sku: r.sku,
+        whId: r.whId,
+        qtyConsumed: r.qtyRequired,
+        qtyPerUnit: r.qtyPerUnit,
+        unitsAtConsumption: r.remainingProductQty,
+        unit: r.unit,
+        recoverable: r.recoverable,
+        recoveryRate: r.recoveryRate,
+        ts: now(),
+        by: State.user?.id,
+      });
+
+      consumed.push({ sku: r.sku, name: r.name, qty: r.qtyRequired, unit: r.unit, before, after: item.qty });
+    }
+
+    // Audit + ticker
+    Audit.log('station_consume', 'WorkOrder', woId, { stationId, materials: consumed.length });
+    Movements.add('info', `${ar ? '⚙ صرف مواد لمحطة' : '⚙ Materials consumed for'} ${stationId}: ${woId} (${consumed.length} ${ar ? 'مواد' : 'items'})`, { woId, stationId });
+
+    // Cloud sync — push consumption records (fire and forget)
+    if (typeof Repo !== 'undefined' && Repo.stationConsumption) {
+      const newRecords = (State.data.stationConsumption || []).filter(c => c.woId === woId && c.stationId === stationId);
+      newRecords.forEach(c => Repo.stationConsumption.insert(c).catch(e => console.error('[BOM consume sync]', e)));
+    }
+
+    State.save();
+    return { ok: true, consumed };
+  },
+
+  // Get all consumption records for a WO (across all stations)
+  forWO(woId) {
+    return (State.data.stationConsumption || []).filter(c => c.woId === woId);
+  },
+};
+
 /* ============ WORKFLOW ENGINE ============ */
 const WF = {
   // Move WO to next stage with full audit
@@ -1878,6 +2122,29 @@ const WF = {
     // If next is AT_COMMITTEE but committee is disabled, skip it
     if (next === 'AT_COMMITTEE' && !State.data.committee?.enabled) {
       next = nextStage('AT_COMMITTEE'); // = DELIVERED
+    }
+
+    // BOM consumption check — when entering a station that has a recipe, validate + consume
+    // Triggered for AT_K1, AT_K2, AT_K3, AT_K4 — uses opts.skipBOM to bypass (e.g. on rework)
+    const stationIdForStage = next.startsWith('AT_K') ? next.replace('AT_', '') : null;
+    if (stationIdForStage && !opts.skipBOM) {
+      const recipe = BOM.forStation(stationIdForStage);
+      if (recipe.length > 0) {
+        const validation = BOM.validate(woId, stationIdForStage);
+        if (!validation.ok) {
+          const msg = State.lang === 'ar'
+            ? `لا يمكن البدء — مواد ناقصة:\n${validation.errors.map(e => '• ' + e.msg).join('\n')}`
+            : `Cannot start — missing materials:\n${validation.errors.map(e => '• ' + e.msg).join('\n')}`;
+          toast(msg, 'error');
+          return false;
+        }
+        // Consume materials (idempotent)
+        const result = BOM.consume(woId, stationIdForStage);
+        if (!result.ok) {
+          toast(result.error || (State.lang === 'ar' ? 'فشل صرف المواد' : 'Material consumption failed'), 'error');
+          return false;
+        }
+      }
     }
 
     const fromUser = State.user.id;
@@ -3869,6 +4136,7 @@ View.admin = function() {
     { id: 'users',     label: ar?'المستخدمون':'Users',         icon: '👤' },
     { id: 'depts',     label: ar?'الأقسام':'Departments',      icon: '🏢' },
     { id: 'stations',  label: ar?'المحطات':'Stations',         icon: '⚙' },
+    { id: 'bom',       label: ar?'وصفات المحطات (BOM)':'Station BOM', icon: '🧾' },
     { id: 'workflow',  label: ar?'مراحل الإنتاج':'Workflow',   icon: '↦' },
     { id: 'backup',    label: ar?'النسخ الاحتياطي':'Backup',   icon: '⤓' },
   ];
@@ -3889,6 +4157,7 @@ View.admin = function() {
   `;
   ({
     users: View.adminUsers, depts: View.adminDepts, stations: View.adminStations,
+    bom: View.adminBOM,
     workflow: View.adminWorkflow, backup: View.adminBackup,
   })[View.adminTab]();
 };
@@ -3964,6 +4233,64 @@ View.adminStations = function() {
         }).join('')}</tbody>
       </table></div>
     </div>
+  `;
+};
+
+// ─────── BOM ADMIN — Bill of Materials per Station ───────
+View.adminBOM = function() {
+  const ar = State.lang === 'ar';
+  const stations = ['K1', 'K2', 'K3', 'K4'];
+  const bom = State.data.bom || {};
+
+  const card = (stationId) => {
+    const recipe = bom[stationId] || [];
+    const station = Q.station(stationId);
+    return `
+      <div class="card mb-2">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+          <span><span class="tag" style="background:var(--glass-2);padding:3px 8px;border-radius:6px;margin-${ar?'left':'right'}:8px">${stationId}</span>${escapeHTML(station ? (ar?station.name:station.nameEn) : stationId)}</span>
+          <button class="btn btn-sm btn-primary" onclick="Action.addBOMMaterial('${stationId}')">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+            ${ar?'إضافة مادة':'Add Material'}
+          </button>
+        </div>
+        ${recipe.length === 0 ? `<div class="empty-state">${ar?'لم تُحدَّد مواد لهذه المحطة بعد':'No materials defined for this station yet'}</div>` : `
+          <div style="overflow-x:auto"><table class="data">
+            <thead><tr>
+              <th>SKU</th>
+              <th>${ar?'الاسم':'Name'}</th>
+              <th>${ar?'المخزن':'Warehouse'}</th>
+              <th>${ar?'الكمية لكل وحدة':'Qty per Unit'}</th>
+              <th>${ar?'الوحدة':'Unit'}</th>
+              <th>${ar?'قابل للاسترداد':'Recoverable'}</th>
+              <th></th>
+            </tr></thead>
+            <tbody>${recipe.map((m, idx) => `
+              <tr>
+                <td class="mono"><b>${escapeHTML(m.sku)}</b></td>
+                <td>${escapeHTML(ar?m.name:m.nameEn)}</td>
+                <td><span class="tag">${escapeHTML((Q.wh(m.whId)||{}).code || m.whId)}</span></td>
+                <td class="mono">${fmt.num(m.qtyPerUnit)}</td>
+                <td>${escapeHTML(m.unit)}</td>
+                <td>${m.recoverable ? `<span class="badge-status b-completed">✓ ${fmt.num((m.recoveryRate||0)*100)}%</span>` : `<span class="text-mute">—</span>`}</td>
+                <td>
+                  <button class="btn btn-sm btn-secondary" onclick="Action.editBOMMaterial('${stationId}',${idx})">${ar?'تعديل':'Edit'}</button>
+                  <button class="btn btn-sm btn-secondary" onclick="Action.deleteBOMMaterial('${stationId}',${idx})" style="color:var(--rose)">${ar?'حذف':'Delete'}</button>
+                </td>
+              </tr>
+            `).join('')}</tbody>
+          </table></div>
+        `}
+      </div>
+    `;
+  };
+
+  document.getElementById('adminBody').innerHTML = `
+    <div style="background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:9px;padding:11px;margin-bottom:14px;font-size:11.5px">
+      ℹ <b style="color:var(--sky)">${ar?'وصفة المحطة (BOM)':'Station Recipe (BOM)'}</b>
+      <div style="margin-top:4px;color:var(--text-2)">${ar?'عند بدء أمر الشغل في كل محطة، يصرف النظام تلقائياً المواد المحددة هنا من المخزن. الكميات محسوبة كـ (الكمية لكل وحدة × عدد الوحدات في الـ WO).':'When a WO enters each station, the system automatically issues the materials defined here from the warehouse. Quantities = qtyPerUnit × WO units.'}</div>
+    </div>
+    ${stations.map(card).join('')}
   `;
 };
 
@@ -4090,6 +4417,29 @@ const Action = {
           </div>`;
         }).join('')}
       </div>
+      ${(() => {
+        const consumption = BOM.forWO(woId);
+        if (consumption.length === 0) return '';
+        // Group by station
+        const byStation = {};
+        consumption.forEach(c => { (byStation[c.stationId] = byStation[c.stationId] || []).push(c); });
+        return `
+          <div class="card-title" style="margin-top:14px;margin-bottom:8px">🧾 ${ar?'استهلاك المواد':'Material Consumption'}</div>
+          <div style="background:var(--glass);border-radius:8px;padding:10px;font-size:11.5px">
+            ${Object.keys(byStation).sort().map(st => `
+              <div style="margin-bottom:8px">
+                <div style="font-weight:600;color:var(--gold);margin-bottom:4px">${st}</div>
+                ${byStation[st].map(c => `
+                  <div style="display:flex;justify-content:space-between;padding:3px 8px;font-size:11px">
+                    <span class="mono">${escapeHTML(c.sku)}</span>
+                    <span class="text-mute mono">${fmt.num(c.qtyConsumed)} ${escapeHTML(c.unit)}</span>
+                  </div>
+                `).join('')}
+              </div>
+            `).join('')}
+          </div>
+        `;
+      })()}
     `;
 
     const canReturn = (wo.currentStage === 'AT_GDN' || wo.currentStage === 'DELIVERED') &&
@@ -5450,6 +5800,151 @@ const Action = {
     App.closeModal();
     toast(State.lang==='ar'?'تم الحفظ':'Saved','success');
     View.adminStations();
+  },
+
+  // ─────── ADMIN — BOM (Bill of Materials) ───────
+  addBOMMaterial(stationId) {
+    if (!Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
+    this._bomDialog(stationId, null);
+  },
+
+  editBOMMaterial(stationId, idx) {
+    if (!Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
+    this._bomDialog(stationId, idx);
+  },
+
+  _bomDialog(stationId, editIdx) {
+    const ar = State.lang === 'ar';
+    const isEdit = editIdx !== null && editIdx !== undefined;
+    const existing = isEdit ? (State.data.bom[stationId] || [])[editIdx] : null;
+    const whOpts = State.data.warehouses.map(w => `<option value="${w.id}" ${existing?.whId===w.id?'selected':(w.dept==='RAW'?'selected':'')}>${escapeHTML(w.code)} — ${escapeHTML(ar?w.name:w.nameEn)}</option>`).join('');
+
+    const body = `
+      <div style="background:rgba(245,185,66,0.06);border:1px solid rgba(245,185,66,0.25);border-radius:9px;padding:10px;margin-bottom:14px;font-size:11.5px">
+        🧾 <b>${stationId}</b> — ${ar?'وصفة المحطة':'Station Recipe'}
+      </div>
+      <div class="form-grid">
+        <div class="form-row">
+          <div class="field">
+            <label>SKU <span class="req">*</span></label>
+            <input id="bomSku" class="mono" value="${existing?escapeHTML(existing.sku):''}" placeholder="${ar?'مثال: PC-SHEET-A4':'e.g. PC-SHEET-A4'}" ${isEdit?'readonly':''}>
+            <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">${ar?'يجب أن يكون موجوداً في المستودع المختار':'Must exist in the selected warehouse'}</div>
+          </div>
+          <div class="field">
+            <label>${ar?'المستودع':'Warehouse'} <span class="req">*</span></label>
+            <select id="bomWh">${whOpts}</select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'الاسم بالعربي':'Name (AR)'} <span class="req">*</span></label>
+            <input id="bomName" value="${existing?escapeHTML(existing.name):''}">
+          </div>
+          <div class="field">
+            <label>${ar?'الاسم بالإنجليزي':'Name (EN)'}</label>
+            <input id="bomNameEn" value="${existing?escapeHTML(existing.nameEn||''):''}">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'الكمية لكل وحدة منتج':'Qty per Output Unit'} <span class="req">*</span></label>
+            <input id="bomQtyPerUnit" type="number" min="0" step="any" value="${existing?existing.qtyPerUnit:'1'}">
+            <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">${ar?'مثلاً ٢ يعني تصرف ٢ من هذي المادة لكل بطاقة منتجة':'e.g. 2 means consume 2 of this material per finished unit'}</div>
+          </div>
+          <div class="field">
+            <label>${ar?'الوحدة':'Unit'} <span class="req">*</span></label>
+            <select id="bomUnit">
+              ${['pc','sheet','g','kg','ml','l','m','cm','box'].map(u => `<option value="${u}" ${existing?.unit===u?'selected':''}>${u}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'قابل للاسترداد عند الـ Scrap؟':'Recoverable on Scrap?'}</label>
+            <select id="bomRecoverable">
+              <option value="false" ${!existing?.recoverable?'selected':''}>${ar?'لا — تُهدر مع المنتج التالف':'No — wasted with scrapped product'}</option>
+              <option value="true" ${existing?.recoverable?'selected':''}>${ar?'نعم — تُسترد للمعالجة':'Yes — recovered for reprocessing'}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>${ar?'نسبة الاسترداد (٠-١)':'Recovery Rate (0-1)'}</label>
+            <input id="bomRecoveryRate" type="number" min="0" max="1" step="0.01" value="${existing?(existing.recoveryRate||0):'0.95'}">
+            <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">${ar?'مثلاً ٠٫٩٥ يعني ٩٥٪ من المادة تُسترد':'e.g. 0.95 = 95% recovered'}</div>
+          </div>
+        </div>
+      </div>
+    `;
+    App.openModal(
+      `${isEdit ? (ar?'تعديل مادة':'Edit Material') : (ar?'إضافة مادة جديدة':'Add Material')} — ${stationId}`,
+      body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.saveBOMMaterial('${stationId}', ${isEdit?editIdx:'null'})">${t('save')}</button>`,
+      true
+    );
+  },
+
+  saveBOMMaterial(stationId, editIdx) {
+    if (!Perm.isManager()) return;
+    const ar = State.lang === 'ar';
+    const get = (id) => (document.getElementById(id)?.value || '').trim();
+    const sku = get('bomSku').toUpperCase();
+    const whId = get('bomWh');
+    const name = get('bomName');
+    const nameEn = get('bomNameEn') || name;
+    const qtyPerUnit = parseFloat(document.getElementById('bomQtyPerUnit').value);
+    const unit = get('bomUnit');
+    const recoverable = document.getElementById('bomRecoverable').value === 'true';
+    const recoveryRate = parseFloat(document.getElementById('bomRecoveryRate').value) || 0;
+
+    if (!sku || !name) { toast(ar?'SKU والاسم مطلوبان':'SKU and name required','error'); return; }
+    if (isNaN(qtyPerUnit) || qtyPerUnit <= 0) { toast(ar?'الكمية يجب أن تكون موجبة':'Qty must be positive','error'); return; }
+
+    if (!State.data.bom) State.data.bom = {};
+    if (!State.data.bom[stationId]) State.data.bom[stationId] = [];
+    const arr = State.data.bom[stationId];
+
+    const entry = { sku, name, nameEn, whId, qtyPerUnit, unit, recoverable, recoveryRate: recoverable ? recoveryRate : 0 };
+
+    const isEdit = editIdx !== null && editIdx !== 'null' && editIdx !== undefined;
+    if (isEdit) {
+      arr[editIdx] = entry;
+      Audit.log('edit_bom', 'BOM', `${stationId}/${sku}`, { qtyPerUnit, recoverable });
+    } else {
+      // Check duplicate
+      if (arr.some(m => m.sku === sku)) { toast(ar?'الـ SKU موجود مسبقاً':'SKU already in this BOM','error'); return; }
+      arr.push(entry);
+      Audit.log('add_bom', 'BOM', `${stationId}/${sku}`, { qtyPerUnit });
+    }
+
+    Movements.add('info', `🧾 ${ar?'تحديث BOM':'BOM updated'}: ${stationId} — ${sku} (${fmt.num(qtyPerUnit)} ${unit}/${ar?'وحدة':'unit'})`, { stationId, sku });
+    State.save();
+    // Cloud sync
+    if (typeof Repo !== 'undefined' && Repo.bom) {
+      Repo.bom.upsertStation(stationId, arr).then(ok => {
+        if (!ok) toast(ar?'⚠ حُفظ محلياً، فشل sync':'⚠ Saved locally, sync failed','warn');
+      });
+    }
+    App.closeModal();
+    toast(ar?'✓ تم حفظ الوصفة':'✓ Recipe saved','success');
+    View.adminBOM();
+  },
+
+  deleteBOMMaterial(stationId, idx) {
+    if (!Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
+    const ar = State.lang === 'ar';
+    const m = (State.data.bom[stationId] || [])[idx];
+    if (!m) return;
+    if (!confirm(ar ? `حذف ${m.sku} من وصفة ${stationId}؟` : `Delete ${m.sku} from ${stationId} recipe?`)) return;
+    State.data.bom[stationId].splice(idx, 1);
+    Audit.log('delete_bom', 'BOM', `${stationId}/${m.sku}`, {});
+    Movements.add('warn', `🧾 ${ar?'حذف من BOM':'BOM removed'}: ${stationId} — ${m.sku}`, { stationId, sku: m.sku });
+    State.save();
+    // Cloud sync
+    if (typeof Repo !== 'undefined' && Repo.bom) {
+      Repo.bom.upsertStation(stationId, State.data.bom[stationId]).catch(e => console.error('[BOM delete sync]', e));
+    }
+    toast(ar?'تم الحذف':'Deleted','info');
+    View.adminBOM();
   },
 
   // ─────── ADMIN — STAGE NAME EDIT ───────
