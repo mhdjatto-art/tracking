@@ -1246,15 +1246,22 @@ const Movements = {
   },
   addStock({ whId, sku, type, qty, ref, notes }) {
     if (!State.data.stockMovements) State.data.stockMovements = [];
-    State.data.stockMovements.unshift({
+    const signedQty = (type === 'issue') ? -Math.abs(qty) : qty;
+    const mv = {
       id: uid('SM'), ts: now(),
       whId, sku, type,
-      qty: (type === 'issue') ? -Math.abs(qty) : qty,
+      qty: signedQty,
       ref: ref || '',
       notes: notes || '',
       user: State.user?.id, userName: State.user?.name,
-    });
+      by: State.user?.id,
+    };
+    State.data.stockMovements.unshift(mv);
     if (State.data.stockMovements.length > 5000) State.data.stockMovements.length = 5000;
+    // Cloud sync — fire and forget
+    if (typeof Repo !== 'undefined' && Repo.stockMovements) {
+      Repo.stockMovements.insert(mv).catch(err => console.error('[stockMovements sync]', err));
+    }
   }
 };
 
@@ -1449,6 +1456,411 @@ const Q = {
     });
     return tasks;
   }
+};
+
+/* ============ REPO — CLOUD CRUD LAYER (Phase 1.4b) ============ */
+// Hybrid pattern: writes go to BOTH localStorage (instant) AND Supabase (background).
+// Reads from localStorage by default; bootstrap pulls from Supabase on login.
+// Failures log to console but never block the UI — offline-resilient.
+
+const Repo = {
+  // Tracks the last sync state so we can show indicators
+  _lastSync: null,
+  _syncErrors: [],
+
+  // Utility: log sync error without blocking
+  _err(op, error) {
+    console.error('[Repo]', op, error);
+    this._syncErrors.unshift({ op, msg: error?.message || String(error), ts: Date.now() });
+    if (this._syncErrors.length > 50) this._syncErrors.length = 50;
+  },
+
+  _ok(op) {
+    this._lastSync = Date.now();
+  },
+
+  // ─── camelCase ↔ snake_case mappers ───
+  _supplierToDB(s) {
+    return {
+      code: s.code, name: s.name, name_en: s.nameEn || null,
+      category: s.category, country: s.country || null, city: s.city || null,
+      contact_person: s.contactPerson || null, title: s.title || null,
+      email: s.email || null, phone: s.phone || null, address: s.address || null,
+      materials: s.materials || [], notes: s.notes || null,
+      active: s.active !== false, created_by: s.createdBy || null,
+    };
+  },
+  _supplierFromDB(r) {
+    return {
+      code: r.code, name: r.name, nameEn: r.name_en, category: r.category,
+      country: r.country, city: r.city, contactPerson: r.contact_person, title: r.title,
+      email: r.email, phone: r.phone, address: r.address, materials: r.materials || [],
+      notes: r.notes, active: r.active !== false, createdBy: r.created_by,
+      createdAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
+    };
+  },
+
+  _maintToDB(m) {
+    return {
+      id: m.id, station_id: m.stationId,
+      fault_title: m.faultTitle || m.title, description: m.description || m.desc || null,
+      initial_check: m.initialCheck || null,
+      station_status_at_request: m.stationStatusAtRequest || null,
+      requested_priority: m.requestedPriority || m.priority,
+      requested_by: m.requestedBy, requested_at: m.requestedAt ? new Date(m.requestedAt).toISOString() : null,
+      status: m.status, priority: m.priority,
+      evaluated_by: m.evaluatedBy || null,
+      evaluated_at: m.evaluatedAt ? new Date(m.evaluatedAt).toISOString() : null,
+      diagnosis: m.diagnosis || null, parts_needed: m.partsNeeded || null,
+      maintenance_type: m.maintenanceType || null, estimated_hours: m.estimatedHours || null,
+      work_order_number: m.workOrderNumber || null,
+      assigned_to: m.assignedTo || null,
+      started_at: m.startedAt ? new Date(m.startedAt).toISOString() : null,
+      started_by: m.startedBy || null,
+      completed_at: m.completedAt ? new Date(m.completedAt).toISOString() : null,
+      completed_by: m.completedBy || null,
+      work_performed: m.workPerformed || null, parts_used: m.partsUsed || null,
+      actual_hours: m.actualHours || null, test_results: m.testResults || null,
+      completion_notes: m.completionNotes || null,
+      verified_by: m.verifiedBy || null,
+      verified_at: m.verifiedAt ? new Date(m.verifiedAt).toISOString() : null,
+      verification_notes: m.verificationNotes || null,
+      production_notified: m.productionNotified || false,
+      rejected_by: m.rejectedBy || null,
+      rejected_at: m.rejectedAt ? new Date(m.rejectedAt).toISOString() : null,
+      rejection_reason: m.rejectionReason || null,
+      history: m.history || [],
+    };
+  },
+  _maintFromDB(r) {
+    const toMs = (s) => s ? new Date(s).getTime() : null;
+    return {
+      id: r.id, stationId: r.station_id,
+      faultTitle: r.fault_title, description: r.description, initialCheck: r.initial_check,
+      stationStatusAtRequest: r.station_status_at_request,
+      requestedPriority: r.requested_priority,
+      requestedBy: r.requested_by, requestedAt: toMs(r.requested_at),
+      status: r.status, priority: r.priority,
+      evaluatedBy: r.evaluated_by, evaluatedAt: toMs(r.evaluated_at),
+      diagnosis: r.diagnosis, partsNeeded: r.parts_needed,
+      maintenanceType: r.maintenance_type, estimatedHours: r.estimated_hours,
+      workOrderNumber: r.work_order_number,
+      assignedTo: r.assigned_to,
+      startedAt: toMs(r.started_at), startedBy: r.started_by,
+      completedAt: toMs(r.completed_at), completedBy: r.completed_by,
+      workPerformed: r.work_performed, partsUsed: r.parts_used,
+      actualHours: r.actual_hours, testResults: r.test_results,
+      completionNotes: r.completion_notes,
+      verifiedBy: r.verified_by, verifiedAt: toMs(r.verified_at),
+      verificationNotes: r.verification_notes, productionNotified: r.production_notified,
+      rejectedBy: r.rejected_by, rejectedAt: toMs(r.rejected_at),
+      rejectionReason: r.rejection_reason,
+      history: r.history || [],
+    };
+  },
+
+  _returnToDB(r) {
+    return {
+      id: r.id, wo_id: r.woId, qty: r.qty, defect_type: r.defectType || null,
+      reason: r.reason, notes: r.notes || null, source: r.source || null,
+      status: r.status || 'pending', disposition: r.disposition || null,
+      reprocess_stage: r.reprocessStage || null,
+      requested_by: r.requestedBy, decided_by: r.decidedBy || null,
+      decided_at: r.decidedAt ? new Date(r.decidedAt).toISOString() : null,
+      decision_notes: r.decisionNotes || null,
+    };
+  },
+  _returnFromDB(r) {
+    const toMs = (s) => s ? new Date(s).getTime() : null;
+    return {
+      id: r.id, woId: r.wo_id, qty: r.qty, defectType: r.defect_type,
+      reason: r.reason, notes: r.notes, source: r.source,
+      status: r.status, disposition: r.disposition, reprocessStage: r.reprocess_stage,
+      requestedBy: r.requested_by, decidedBy: r.decided_by,
+      decidedAt: toMs(r.decided_at), decisionNotes: r.decision_notes,
+      ts: toMs(r.created_at) || Date.now(),
+    };
+  },
+
+  _stkMvFromDB(r) {
+    return {
+      whId: r.warehouse_id, sku: r.sku, type: r.type, qty: r.qty,
+      qtyBefore: r.qty_before, qtyAfter: r.qty_after,
+      ref: r.ref, notes: r.notes, supplierCode: r.supplier_code, woId: r.wo_id,
+      by: r.by_user, ts: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
+    };
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // SUPPLIERS
+  // ═══════════════════════════════════════════════════════════════════
+  suppliers: {
+    async list() {
+      if (!sb) return null;
+      const { data, error } = await sb.from('suppliers').select('*').order('code');
+      if (error) { Repo._err('suppliers.list', error); return null; }
+      Repo._ok('suppliers.list');
+      return (data || []).map(Repo._supplierFromDB);
+    },
+    async upsert(supplier) {
+      if (!sb) return false;
+      const { error } = await sb.from('suppliers').upsert(Repo._supplierToDB(supplier), { onConflict: 'code' });
+      if (error) { Repo._err('suppliers.upsert', error); return false; }
+      Repo._ok('suppliers.upsert');
+      return true;
+    },
+    async delete(code) {
+      if (!sb) return false;
+      const { error } = await sb.from('suppliers').delete().eq('code', code);
+      if (error) { Repo._err('suppliers.delete', error); return false; }
+      Repo._ok('suppliers.delete');
+      return true;
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // MAINTENANCE REQUESTS
+  // ═══════════════════════════════════════════════════════════════════
+  maintenance: {
+    async list() {
+      if (!sb) return null;
+      const { data, error } = await sb.from('maintenance_requests').select('*').order('requested_at', { ascending: false });
+      if (error) { Repo._err('maintenance.list', error); return null; }
+      Repo._ok('maintenance.list');
+      return (data || []).map(Repo._maintFromDB);
+    },
+    async upsert(mr) {
+      if (!sb) return false;
+      const { error } = await sb.from('maintenance_requests').upsert(Repo._maintToDB(mr), { onConflict: 'id' });
+      if (error) { Repo._err('maintenance.upsert', error); return false; }
+      Repo._ok('maintenance.upsert');
+      return true;
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // COMMITTEE (config + members + reviews)
+  // ═══════════════════════════════════════════════════════════════════
+  committee: {
+    async getConfig() {
+      if (!sb) return null;
+      const { data, error } = await sb.from('committee_config').select('*').eq('id', 1).single();
+      if (error) { Repo._err('committee.getConfig', error); return null; }
+      Repo._ok('committee.getConfig');
+      return { enabled: !!data.enabled, requiredApprovals: data.required_approvals };
+    },
+    async setConfig(cfg) {
+      if (!sb) return false;
+      const { error } = await sb.from('committee_config').update({
+        enabled: cfg.enabled,
+        required_approvals: cfg.requiredApprovals,
+        updated_by: State.user?.id || null,
+      }).eq('id', 1);
+      if (error) { Repo._err('committee.setConfig', error); return false; }
+      Repo._ok('committee.setConfig');
+      return true;
+    },
+    async listMembers() {
+      if (!sb) return null;
+      const { data, error } = await sb.from('committee_members').select('*');
+      if (error) { Repo._err('committee.listMembers', error); return null; }
+      Repo._ok('committee.listMembers');
+      return (data || []).map(r => ({
+        userId: r.user_id, addedBy: r.added_by,
+        addedAt: r.added_at ? new Date(r.added_at).getTime() : Date.now()
+      }));
+    },
+    async setMembers(memberIds) {
+      // Replace all members atomically (simple delete-all + bulk insert)
+      if (!sb) return false;
+      const { error: delErr } = await sb.from('committee_members').delete().neq('user_id', '___never___');
+      if (delErr) { Repo._err('committee.deleteMembers', delErr); return false; }
+      if (memberIds.length > 0) {
+        const rows = memberIds.map(uid => ({ user_id: uid, added_by: State.user?.id || null }));
+        const { error: insErr } = await sb.from('committee_members').insert(rows);
+        if (insErr) { Repo._err('committee.insertMembers', insErr); return false; }
+      }
+      Repo._ok('committee.setMembers');
+      return true;
+    },
+    async listReviews() {
+      if (!sb) return null;
+      const { data, error } = await sb.from('committee_reviews').select('*').order('created_at', { ascending: false });
+      if (error) { Repo._err('committee.listReviews', error); return null; }
+      Repo._ok('committee.listReviews');
+      return (data || []).map(r => ({
+        id: 'CR-' + r.id, woId: r.wo_id, userId: r.user_id,
+        decision: r.decision, notes: r.notes,
+        ts: r.created_at ? new Date(r.created_at).getTime() : Date.now()
+      }));
+    },
+    async addReview(review) {
+      if (!sb) return false;
+      const { error } = await sb.from('committee_reviews').insert({
+        wo_id: review.woId, user_id: review.userId,
+        decision: review.decision, notes: review.notes || null,
+      });
+      if (error) { Repo._err('committee.addReview', error); return false; }
+      Repo._ok('committee.addReview');
+      return true;
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // RETURNS
+  // ═══════════════════════════════════════════════════════════════════
+  returns: {
+    async list() {
+      if (!sb) return null;
+      const { data, error } = await sb.from('returns').select('*').order('created_at', { ascending: false });
+      if (error) { Repo._err('returns.list', error); return null; }
+      Repo._ok('returns.list');
+      return (data || []).map(Repo._returnFromDB);
+    },
+    async upsert(ret) {
+      if (!sb) return false;
+      const { error } = await sb.from('returns').upsert(Repo._returnToDB(ret), { onConflict: 'id' });
+      if (error) { Repo._err('returns.upsert', error); return false; }
+      Repo._ok('returns.upsert');
+      return true;
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // STOCK MOVEMENTS (immutable)
+  // ═══════════════════════════════════════════════════════════════════
+  stockMovements: {
+    async list(limit = 500) {
+      if (!sb) return null;
+      const { data, error } = await sb.from('stock_movements').select('*').order('created_at', { ascending: false }).limit(limit);
+      if (error) { Repo._err('stockMovements.list', error); return null; }
+      Repo._ok('stockMovements.list');
+      return (data || []).map(Repo._stkMvFromDB);
+    },
+    async insert(mv) {
+      if (!sb) return false;
+      const { error } = await sb.from('stock_movements').insert({
+        warehouse_id: mv.whId, sku: mv.sku, type: mv.type, qty: mv.qty,
+        qty_before: mv.qtyBefore || null, qty_after: mv.qtyAfter || null,
+        ref: mv.ref || null, notes: mv.notes || null,
+        supplier_code: mv.supplierCode || null, wo_id: mv.woId || null,
+        by_user: mv.by || State.user?.id,
+      });
+      if (error) { Repo._err('stockMovements.insert', error); return false; }
+      Repo._ok('stockMovements.insert');
+      return true;
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // BOOTSTRAP — load all cloud data into State.data on login
+  // Called from the auth flow after successful login.
+  // ═══════════════════════════════════════════════════════════════════
+  async bootstrap() {
+    if (!sb) {
+      console.warn('[Repo] No Supabase client — skipping cloud bootstrap');
+      return false;
+    }
+    console.log('[Repo] Bootstrapping from cloud...');
+    const t0 = Date.now();
+
+    try {
+      const [suppliers, maintenance, ccfg, cmembers, creviews, returns, stkMvs] = await Promise.all([
+        this.suppliers.list(),
+        this.maintenance.list(),
+        this.committee.getConfig(),
+        this.committee.listMembers(),
+        this.committee.listReviews(),
+        this.returns.list(),
+        this.stockMovements.list(500),
+      ]);
+
+      if (suppliers !== null) State.data.suppliers = suppliers;
+      if (maintenance !== null) State.data.maintenanceRequests = maintenance;
+      if (ccfg !== null) {
+        if (!State.data.committee) State.data.committee = {};
+        State.data.committee.enabled = ccfg.enabled;
+        State.data.committee.requiredApprovals = ccfg.requiredApprovals;
+      }
+      if (cmembers !== null) {
+        if (!State.data.committee) State.data.committee = { members: [], requiredApprovals: 3, enabled: false };
+        State.data.committee.members = cmembers;
+      }
+      if (creviews !== null) State.data.committeeReviews = creviews;
+      if (returns !== null) State.data.returns = returns;
+      if (stkMvs !== null) State.data.stockMovements = stkMvs;
+
+      State.save();
+      console.log(`[Repo] Bootstrap complete in ${Date.now() - t0}ms — `, {
+        suppliers: suppliers?.length, maintenance: maintenance?.length,
+        committeeMembers: cmembers?.length, committeeReviews: creviews?.length,
+        returns: returns?.length, stockMovements: stkMvs?.length,
+      });
+      return true;
+    } catch (e) {
+      console.error('[Repo] Bootstrap failed:', e);
+      return false;
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // REALTIME — subscribe to changes from other users
+  // ═══════════════════════════════════════════════════════════════════
+  _channels: [],
+  subscribeAll() {
+    if (!sb) return;
+    this.unsubscribeAll();
+
+    const channel = sb.channel('prodline_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'suppliers' }, async () => {
+        const list = await this.suppliers.list();
+        if (list !== null) { State.data.suppliers = list; State.save(); this._refreshIfShowing('suppliers'); }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'maintenance_requests' }, async () => {
+        const list = await this.maintenance.list();
+        if (list !== null) { State.data.maintenanceRequests = list; State.save(); this._refreshIfShowing('maintenance'); }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'committee_reviews' }, async () => {
+        const list = await this.committee.listReviews();
+        if (list !== null) { State.data.committeeReviews = list; State.save(); this._refreshIfShowing('committee'); }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'committee_members' }, async () => {
+        const list = await this.committee.listMembers();
+        if (list !== null && State.data.committee) { State.data.committee.members = list; State.save(); this._refreshIfShowing('committee'); }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'committee_config' }, async () => {
+        const cfg = await this.committee.getConfig();
+        if (cfg !== null && State.data.committee) {
+          State.data.committee.enabled = cfg.enabled;
+          State.data.committee.requiredApprovals = cfg.requiredApprovals;
+          State.save();
+          this._refreshIfShowing('committee');
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'returns' }, async () => {
+        const list = await this.returns.list();
+        if (list !== null) { State.data.returns = list; State.save(); this._refreshIfShowing('returns'); }
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'stock_movements' }, async () => {
+        const list = await this.stockMovements.list(500);
+        if (list !== null) { State.data.stockMovements = list; State.save(); this._refreshIfShowing('warehouses'); }
+      })
+      .subscribe((status) => {
+        console.log('[Repo] Realtime status:', status);
+      });
+
+    this._channels.push(channel);
+  },
+  unsubscribeAll() {
+    if (!sb) return;
+    this._channels.forEach(c => sb.removeChannel(c));
+    this._channels = [];
+  },
+  _refreshIfShowing(view) {
+    if (State.currentView === view && typeof View[view] === 'function') {
+      try { View[view](); } catch (e) { console.warn('[Repo] view refresh failed:', e); }
+    }
+  },
 };
 
 /* ============ WORKFLOW ENGINE ============ */
@@ -1856,6 +2268,20 @@ const App = {
       this.renderSidebar();
       this.startLive();
       this.goto('dashboard');
+
+      // Cloud bootstrap — fetch all data from Supabase
+      Repo.bootstrap().then(ok => {
+        if (ok) {
+          // Subscribe to realtime updates from other users
+          Repo.subscribeAll();
+          // Refresh current view with fresh data
+          if (State.currentView) {
+            try { App.goto(State.currentView); } catch(e) {}
+          }
+        } else {
+          console.warn('[App] Cloud bootstrap failed — running on local cache');
+        }
+      });
     } catch (e) {
       this.showLoginError('خطأ في تحميل ملف المستخدم: ' + e.message);
     }
@@ -3973,6 +4399,9 @@ const Action = {
     Audit.log('request_maint', 'Maintenance', id, { stationId, priority, stnStatus });
     Movements.add('warn', `🛠 ${ar?'طلب صيانة جديد':'New maintenance request'}: ${stationId} — ${title} [${priority}]`, { mrId: id });
     State.save();
+    Repo.maintenance.upsert(req).then(ok => {
+      if (!ok) toast(ar?'⚠ حُفظ محلياً، فشل sync':'⚠ Saved locally, sync failed', 'warn');
+    });
     App.closeModal();
     toast(ar?`✓ تم تقديم الطلب ${id}`:`✓ Request ${id} submitted`, 'success');
     App.goto('maintenance');
@@ -4093,6 +4522,9 @@ const Action = {
     Audit.log('evaluate_maint', 'Maintenance', mrId, { priority, tech, wo: m.workOrderNumber });
     Movements.add('info', `📋 ${ar?'تم تقييم':'Evaluated'} ${mrId} — ${m.workOrderNumber} (${priority})`, { mrId });
     State.save();
+    Repo.maintenance.upsert(m).then(ok => {
+      if (!ok) toast(ar?'⚠ حُفظ محلياً، فشل sync':'⚠ Saved locally, sync failed', 'warn');
+    });
     App.closeModal();
     toast(ar?`✓ ${m.workOrderNumber} جاهز للتنفيذ`:`✓ ${m.workOrderNumber} ready for work`, 'success');
     App.goto('maintenance');
@@ -4121,6 +4553,9 @@ const Action = {
     Audit.log('start_maint', 'Maintenance', mrId, {});
     Movements.add('info', `▶ ${ar?'بدء صيانة':'Maintenance started'}: ${mrId} — ${m.stationId}`, { mrId });
     State.save();
+    Repo.maintenance.upsert(m).then(ok => {
+      if (!ok) toast(ar?'⚠ حُفظ محلياً، فشل sync':'⚠ Saved locally, sync failed', 'warn');
+    });
     toast(ar?'بدأ التنفيذ':'Work started','success');
     App.goto('maintenance');
   },
@@ -4191,6 +4626,9 @@ const Action = {
     Audit.log('finish_maint', 'Maintenance', mrId, { hours });
     Movements.add('ok', `✓ ${ar?'انتهت الصيانة':'Maintenance finished'}: ${mrId} — ${m.stationId} (${ar?'بانتظار تحقق المشرف':'awaiting verification'})`, { mrId });
     State.save();
+    Repo.maintenance.upsert(m).then(ok => {
+      if (!ok) toast(ar?'⚠ حُفظ محلياً، فشل sync':'⚠ Saved locally, sync failed', 'warn');
+    });
     App.closeModal();
     toast(ar?'تم الإنجاز — بانتظار تحقق المشرف':'Done — awaiting supervisor verification','success');
     App.goto('maintenance');
@@ -4248,6 +4686,9 @@ const Action = {
       Audit.log('reject_completion', 'Maintenance', mrId, { notes });
       Movements.add('warn', `↩ ${ar?'إعادة عمل':'Rework required'}: ${mrId}`, { mrId });
       State.save();
+      Repo.maintenance.upsert(m).then(ok => {
+        if (!ok) toast(ar?'⚠ حُفظ محلياً، فشل sync':'⚠ Saved locally, sync failed', 'warn');
+      });
       App.closeModal();
       toast(ar?'تم إرجاع للفني':'Sent back to technician','info');
       App.goto('maintenance');
@@ -4273,6 +4714,9 @@ const Action = {
     Audit.log('verify_maint', 'Maintenance', mrId, { notes });
     Movements.add('ok', `✓ ${ar?'تم إغلاق الصيانة':'Maintenance closed'}: ${mrId} — ${ar?'الإنتاج بُلِّغ':'production notified'}`, { mrId });
     State.save();
+    Repo.maintenance.upsert(m).then(ok => {
+      if (!ok) toast(ar?'⚠ حُفظ محلياً، فشل sync':'⚠ Saved locally, sync failed', 'warn');
+    });
     App.closeModal();
     toast(ar?'✓ تم الإغلاق — المحطة جاهزة':'✓ Closed — station ready','success');
     App.goto('maintenance');
@@ -4320,6 +4764,9 @@ const Action = {
     Audit.log('reject_maint', 'Maintenance', mrId, { reason });
     Movements.add('warn', `✕ ${ar?'تم رفض طلب صيانة':'Maintenance request rejected'}: ${mrId}`, { mrId });
     State.save();
+    Repo.maintenance.upsert(m).then(ok => {
+      if (!ok) toast(ar?'⚠ حُفظ محلياً، فشل sync':'⚠ Saved locally, sync failed', 'warn');
+    });
     App.closeModal();
     toast(ar?'تم الرفض':'Rejected','info');
     App.goto('maintenance');
@@ -4462,6 +4909,13 @@ const Action = {
     Audit.log('committee_config', 'Committee', 'config', { enabled, quorum, memberCount: members.length });
     Movements.add('info', `⚙ ${ar?'تحديث إعدادات لجنة القبول':'Committee config updated'} — ${members.length} ${ar?'عضو':'members'}, ${ar?'النصاب':'quorum'}: ${quorum}`, {});
     State.save();
+    // Cloud sync — both config and members
+    Promise.all([
+      Repo.committee.setConfig({ enabled, requiredApprovals: quorum }),
+      Repo.committee.setMembers(memberIds),
+    ]).then(([ok1, ok2]) => {
+      if (!ok1 || !ok2) toast(ar?'⚠ حُفظ محلياً، فشل sync':'⚠ Saved locally, sync failed', 'warn');
+    });
     App.closeModal();
     toast(ar?'✓ تم حفظ الإعدادات':'✓ Settings saved','success');
     View.committee();
@@ -4518,10 +4972,11 @@ const Action = {
     const cfg = State.data.committee || {};
 
     if (!State.data.committeeReviews) State.data.committeeReviews = [];
-    State.data.committeeReviews.unshift({
-      id: 'CR-' + State.data.committeeReviews.length + 1,
+    const myReview = {
+      id: 'CR-' + (State.data.committeeReviews.length + 1),
       woId, userId: State.user.id, decision, notes, ts: now()
-    });
+    };
+    State.data.committeeReviews.unshift(myReview);
     Audit.log('committee_review', 'WorkOrder', woId, { decision, notes: notes.substring(0, 80) });
     Movements.add(decision==='approve'?'ok':'warn', `${decision==='approve'?'✓':'✕'} ${ar?'مراجعة لجنة':'Committee review'} ${woId} — ${decision}`, { woId });
 
@@ -4530,6 +4985,7 @@ const Action = {
     const approvals = reviews.filter(r => r.decision === 'approve').length;
     const rejections = reviews.filter(r => r.decision === 'reject').length;
     const quorum = cfg.requiredApprovals || 3;
+    let createdReturn = null;
 
     if (approvals >= quorum) {
       // APPROVED — move to DELIVERED
@@ -4540,7 +4996,7 @@ const Action = {
       Movements.add('ok', `🎉 ${ar?'موافقة اللجنة':'Committee APPROVED'} ${woId} — ${ar?'تم التسليم':'delivered'}`, { woId });
     } else if (rejections >= quorum) {
       // REJECTED — return to PMF
-      const ret = {
+      createdReturn = {
         id: 'RET-' + ((State.data.returns||[]).length + 1),
         woId, qty: wo.produced - wo.scrap,
         reason: ar?`رفضت اللجنة (${rejections} رفض)`:`Committee rejected (${rejections} rejections)`,
@@ -4548,15 +5004,21 @@ const Action = {
         requestedBy: State.user.id, ts: now(), status: 'pending', disposition: null
       };
       if (!State.data.returns) State.data.returns = [];
-      State.data.returns.unshift(ret);
+      State.data.returns.unshift(createdReturn);
       wo.currentStage = 'RETURNED';
       wo.currentOwner = State.data.warehouses.find(w=>w.dept==='PMF')?.managerId || null;
-      wo.history.push({ stage: 'RETURNED', action: 'committee_rejected', fromUser: State.user.id, toUser: wo.currentOwner, qty: wo.produced, scrap: wo.scrap, ts: now(), notes: ret.reason });
+      wo.history.push({ stage: 'RETURNED', action: 'committee_rejected', fromUser: State.user.id, toUser: wo.currentOwner, qty: wo.produced, scrap: wo.scrap, ts: now(), notes: createdReturn.reason });
       Audit.log('committee_rejected', 'WorkOrder', woId, { rejections });
       Movements.add('err', `↩ ${ar?'رفض اللجنة':'Committee REJECTED'} ${woId} — ${ar?'مرتجع لـ PMF':'returned to PMF'}`, { woId });
     }
 
     State.save();
+    // Cloud sync — review always, return if quorum-rejected
+    const tasks = [Repo.committee.addReview(myReview)];
+    if (createdReturn) tasks.push(Repo.returns.upsert(createdReturn));
+    Promise.all(tasks).then(results => {
+      if (results.some(r => !r)) toast(ar?'⚠ حُفظ محلياً، فشل sync':'⚠ Saved locally, sync failed', 'warn');
+    });
     App.closeModal();
     toast(ar?'✓ تم تسجيل مراجعتك':'✓ Review submitted','success');
     View.committee();
@@ -4640,6 +5102,9 @@ const Action = {
     Audit.log('return_wo', 'WorkOrder', woId, { qty, prevStage, reason: reason.substring(0,100) });
     Movements.add('warn', `↩ ${ar?'إرجاع دفعة':'Batch returned'} ${woId} (${fmt.num(qty)}) — ${reason.substring(0,40)}`, { woId, retId: ret.id });
     State.save();
+    Repo.returns.upsert(ret).then(ok => {
+      if (!ok) toast(ar?'⚠ حُفظ محلياً، فشل sync':'⚠ Saved locally, sync failed', 'warn');
+    });
     App.closeModal();
     toast(ar?'✓ تم تسجيل المرتجع — في انتظار قرار PMF/QC':'✓ Return logged — awaiting PMF/QC decision','success');
     App.goto('returns');
@@ -4732,6 +5197,9 @@ const Action = {
     }
 
     State.save();
+    Repo.returns.upsert(ret).then(ok => {
+      if (!ok) toast(State.lang==='ar'?'⚠ حُفظ محلياً، فشل sync':'⚠ Saved locally, sync failed', 'warn');
+    });
     App.closeModal();
     App.goto('returns');
   },
@@ -5693,6 +6161,10 @@ Action.saveNewSupplier = function() {
   Audit.log('add_supplier', 'Supplier', code, { name, category: supplier.category });
   Movements.add('info', `${ar?'مورد جديد:':'New supplier:'} ${code} — ${name}`, { code });
   State.save();
+  // Cloud sync (background)
+  Repo.suppliers.upsert(supplier).then(ok => {
+    if (!ok) toast(ar?'⚠ حُفظ محلياً، فشل sync':'⚠ Saved locally, sync failed', 'warn');
+  });
   App.closeModal();
   toast(ar?`✓ تم إضافة ${code}`:`✓ Added ${code}`, 'success');
   View.suppliers();
@@ -5739,6 +6211,9 @@ Action.saveEditSupplier = function(code) {
   s.active = document.getElementById('esActive').value === 'true';
   Audit.log('edit_supplier', 'Supplier', code, { fields: 'multiple' });
   State.save();
+  Repo.suppliers.upsert(s).then(ok => {
+    if (!ok) toast(State.lang==='ar'?'⚠ حُفظ محلياً، فشل sync':'⚠ Saved locally, sync failed', 'warn');
+  });
   App.closeModal();
   toast(State.lang==='ar'?'تم الحفظ':'Saved', 'success');
   View.suppliers();
