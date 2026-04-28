@@ -1388,6 +1388,8 @@ const Seed = {
       maintenance,
       movements,
       stockMovements: [],
+      suppliers: [],
+      maintenanceRequests: [],
       audit: [
         { id: uid('AUD'), ts: now(), user: 'system', userName: 'النظام', action: 'system_init', entity: 'System', entityId: 'init', details: { note: 'تهيئة النظام بدون بيانات تجريبية' } },
       ],
@@ -1900,8 +1902,9 @@ const App = {
         { route: 'floor',       label: t('nav_floor'),    icon: 'floor' },
         { route: 'workorders',  label: t('nav_wo'),       icon: 'wo', badge: State.data.workOrders.filter(w=>w.currentStage!=='DELIVERED'&&w.currentStage!=='REJECTED').length },
         { route: 'warehouses',  label: t('nav_wh'),       icon: 'wh' },
+        { route: 'suppliers',   label: State.lang==='ar'?'الموردون':'Suppliers',  icon: 'wh' },
         { route: 'quality',     label: t('nav_quality'),  icon: 'qc', badge: State.data.workOrders.filter(w=>w.currentStage==='AT_MOC').length },
-        { route: 'maintenance', label: t('nav_maint'),    icon: 'maint', badge: State.data.maintenance.filter(m=>m.status==='in_progress'||m.status==='pending').length },
+        { route: 'maintenance', label: t('nav_maint'),    icon: 'maint', badge: (State.data.maintenanceRequests||[]).filter(m=>m.status==='requested'||m.status==='in_progress').length },
       ]},
       { group: t('nav_compliance'), items: [
         { route: 'trace',  label: t('nav_trace'),  icon: 'trace' },
@@ -1954,6 +1957,7 @@ const App = {
       floor:       View.floor,
       workorders:  View.workorders,
       warehouses:  View.warehouses,
+      suppliers:   View.suppliers,
       quality:     View.quality,
       maintenance: View.maintenance,
       trace:       View.trace,
@@ -2796,6 +2800,83 @@ View.whMovements = function(whId) {
     `<button class="btn btn-secondary" onclick="App.closeModal()">${ar?'إغلاق':'Close'}</button>`, true);
 };
 
+// ─────── SUPPLIERS REGISTRY ───────
+View.suppliers = function() {
+  const ar = State.lang === 'ar';
+  const isMgr = Perm.isManager();
+  const canEdit = isMgr || State.user.dept === 'RAW';
+  const suppliers = State.data.suppliers || [];
+
+  document.getElementById('content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">${ar?'الموردون':'Suppliers'}</div>
+        <div class="page-sub">${ar?'سجل الموردين الرسمي — كل شحنة استلام مرتبطة بمورد':'Official supplier registry — every receipt linked to a supplier'}</div>
+      </div>
+      <div class="page-actions">
+        ${canEdit ? `<button class="btn btn-primary" onclick="Action.newSupplier()">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+          ${ar?'مورد جديد':'New Supplier'}
+        </button>` : ''}
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi" style="--accent:var(--gold);--accent-bg:rgba(245,185,66,0.1)">
+        <div class="kpi-label">${ar?'إجمالي الموردين':'Total Suppliers'}</div>
+        <div class="kpi-value">${suppliers.length}</div>
+        <div class="kpi-delta neutral">${ar?'مسجَّل':'registered'}</div>
+      </div>
+      <div class="kpi" style="--accent:var(--emerald);--accent-bg:rgba(16,185,129,0.1)">
+        <div class="kpi-label">${ar?'نشطون':'Active'}</div>
+        <div class="kpi-value">${suppliers.filter(s=>s.active!==false).length}</div>
+      </div>
+      <div class="kpi" style="--accent:var(--sky);--accent-bg:rgba(56,189,248,0.1)">
+        <div class="kpi-label">${ar?'إجمالي الشحنات':'Total Receipts'}</div>
+        <div class="kpi-value">${(State.data.stockMovements||[]).filter(m=>m.type==='receive').length}</div>
+      </div>
+    </div>
+
+    <div class="card mt-2">
+      <div class="card-title">${ar?'قائمة الموردين':'Supplier List'}</div>
+      ${suppliers.length === 0 ? `<div class="empty-state">${ar?'لا يوجد موردون مسجَّلون — اضغط "مورد جديد" لإضافة أول مورد':'No suppliers — click "New Supplier" to register'}</div>` : `
+      <div style="overflow-x:auto"><table class="data">
+        <thead><tr>
+          <th>${ar?'الكود':'Code'}</th>
+          <th>${ar?'الاسم':'Name'}</th>
+          <th>${ar?'الفئة':'Category'}</th>
+          <th>${ar?'البلد':'Country'}</th>
+          <th>${ar?'جهة الاتصال':'Contact'}</th>
+          <th>${ar?'الإيميل':'Email'}</th>
+          <th>${ar?'الهاتف':'Phone'}</th>
+          <th>${ar?'الشحنات':'Receipts'}</th>
+          <th>${ar?'الحالة':'Status'}</th>
+          ${canEdit ? `<th></th>` : ''}
+        </tr></thead>
+        <tbody>${suppliers.map(s => {
+          const receipts = (State.data.stockMovements||[]).filter(m => m.type==='receive' && m.notes && m.notes.includes(s.code)).length;
+          return `<tr>
+            <td class="mono"><b>${escapeHTML(s.code)}</b></td>
+            <td>${escapeHTML(ar?s.name:s.nameEn||s.name)}</td>
+            <td><span class="badge-status">${escapeHTML(s.category||'—')}</span></td>
+            <td>${escapeHTML(s.country||'—')}</td>
+            <td>${escapeHTML(s.contactPerson||'—')}</td>
+            <td class="text-mute" style="font-size:11px">${escapeHTML(s.email||'—')}</td>
+            <td class="mono" style="font-size:11px">${escapeHTML(s.phone||'—')}</td>
+            <td class="mono">${receipts}</td>
+            <td><span class="badge-status ${s.active!==false?'b-completed':'b-rejected'}">${s.active!==false?(ar?'نشط':'Active'):(ar?'موقوف':'Inactive')}</span></td>
+            ${canEdit ? `<td>
+              <button class="btn btn-sm btn-secondary" onclick="Action.editSupplier('${s.code}')">${ar?'تعديل':'Edit'}</button>
+            </td>` : ''}
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>`}
+    </div>
+  `;
+};
+
+// Add new supplier
+
 // ─────── QUALITY (MOC) ───────
 View.quality = function() {
   const ar = State.lang === 'ar';
@@ -2852,48 +2933,144 @@ View.quality = function() {
 // ─────── MAINTENANCE ───────
 View.maintenance = function() {
   const ar = State.lang === 'ar';
-  const open = State.data.maintenance.filter(m => m.status !== 'completed');
-  const closed = State.data.maintenance.filter(m => m.status === 'completed');
+  const reqs = State.data.maintenanceRequests || [];
+  const requested = reqs.filter(m => m.status === 'requested');
+  const evaluated = reqs.filter(m => m.status === 'evaluated');
+  const inProgress = reqs.filter(m => m.status === 'in_progress');
+  const completed = reqs.filter(m => m.status === 'completed' || m.status === 'verified');
+  const rejected = reqs.filter(m => m.status === 'rejected');
+  const isMaintSup = State.user.dept === 'MAINT' && (State.user.role||'').match(/مشرف|Supervisor/i);
+  const isMaint = State.user.dept === 'MAINT';
+  const canRequest = State.user.dept === 'PROD' || Perm.isManager() || isMaint;
+
   document.getElementById('content').innerHTML = `
     <div class="page-header">
       <div>
         <div class="page-title">${ar?'الصيانة':'Maintenance'}</div>
-        <div class="page-sub">${ar?'طلبات الصيانة — استلام وتنفيذ وإغلاق':'Service requests — request, execute, close'}</div>
+        <div class="page-sub">${ar?'سلسلة طلبات الصيانة: طلب → تقييم → تنفيذ → إنجاز → تحقق':'Maintenance flow: Request → Evaluate → Execute → Complete → Verify'}</div>
       </div>
       <div class="page-actions">
-        ${(Perm.canAct('PROD')||Perm.canAct('MAINT'))?`<button class="btn btn-primary" onclick="Action.requestMaint()"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>${t('request_maint')}</button>`:''}
+        ${canRequest ? `<button class="btn btn-primary" onclick="Action.requestMaint()">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+          ${ar?'طلب صيانة':'Request Maintenance'}
+        </button>` : ''}
       </div>
     </div>
-    <div class="card mb-2">
-      <div class="card-title">${ar?'طلبات مفتوحة':'Open Requests'} (${open.length})</div>
-      ${open.length === 0 ? `<div class="empty-state">${ar?'لا توجد طلبات مفتوحة':'No open requests'}</div>` : `
-        <div style="overflow-x:auto"><table class="data">
-          <thead><tr><th>${ar?'الرقم':'#'}</th><th>${ar?'المحطة':'Station'}</th><th>${ar?'العنوان':'Title'}</th><th>${ar?'الأولوية':'Priority'}</th><th>${ar?'الفني':'Tech'}</th><th>${ar?'الحالة':'Status'}</th><th>${ar?'منذ':'Since'}</th><th></th></tr></thead>
-          <tbody>${open.map(m => {
-            const tech = Q.user(m.assignedTo);
-            const reqr = Q.user(m.requestedBy);
-            return `<tr>
-              <td class="mono"><b>${m.id}</b></td>
-              <td><span class="tag">${m.stationId}</span></td>
-              <td>${escapeHTML(m.title)}<div class="text-mute" style="font-size:11px">${escapeHTML(m.desc||'')}</div></td>
-              <td><span class="badge-status b-${m.priority==='high'?'rejected':m.priority==='medium'?'pending':'closed'}">${m.priority}</span></td>
-              <td>${tech?escapeHTML(ar?tech.name:tech.nameEn):'—'}</td>
-              <td><span class="badge-status b-${m.status==='in_progress'?'progress':'pending'}">${m.status}</span></td>
-              <td class="mono text-mute">${fmt.ago(m.requestedAt)}</td>
-              <td>${Perm.canAct('MAINT')?`<button class="btn btn-sm btn-success" onclick="Action.completeMaint('${m.id}')">${ar?'إنهاء':'Complete'}</button>`:''}</td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table></div>
-      `}
+
+    <div class="kpi-grid">
+      <div class="kpi" style="--accent:var(--rose);--accent-bg:rgba(244,63,94,0.1)">
+        <div class="kpi-label">${ar?'بانتظار التقييم':'Awaiting Evaluation'}</div>
+        <div class="kpi-value">${requested.length}</div>
+        <div class="kpi-delta neutral">${ar?'طلب جديد':'new'}</div>
+      </div>
+      <div class="kpi" style="--accent:var(--amber);--accent-bg:rgba(245,158,11,0.1)">
+        <div class="kpi-label">${ar?'تم التقييم':'Evaluated'}</div>
+        <div class="kpi-value">${evaluated.length}</div>
+        <div class="kpi-delta neutral">${ar?'بانتظار التنفيذ':'awaiting work'}</div>
+      </div>
+      <div class="kpi" style="--accent:var(--sky);--accent-bg:rgba(56,189,248,0.1)">
+        <div class="kpi-label">${ar?'قيد التنفيذ':'In Progress'}</div>
+        <div class="kpi-value">${inProgress.length}</div>
+      </div>
+      <div class="kpi" style="--accent:var(--emerald);--accent-bg:rgba(16,185,129,0.1)">
+        <div class="kpi-label">${ar?'منجزة':'Completed'}</div>
+        <div class="kpi-value">${completed.length}</div>
+      </div>
+      <div class="kpi" style="--accent:var(--text-3);--accent-bg:rgba(255,255,255,0.04)">
+        <div class="kpi-label">${ar?'مرفوضة':'Rejected'}</div>
+        <div class="kpi-value">${rejected.length}</div>
+      </div>
     </div>
-    ${closed.length ? `<div class="card">
-      <div class="card-title">${ar?'مغلقة':'Closed'} (${closed.length})</div>
-      <div style="overflow-x:auto"><table class="data">
-        <thead><tr><th>${ar?'الرقم':'#'}</th><th>${ar?'المحطة':'Station'}</th><th>${ar?'العنوان':'Title'}</th><th>${ar?'تاريخ الإنجاز':'Completed'}</th></tr></thead>
-        <tbody>${closed.map(m=>`<tr><td class="mono">${m.id}</td><td><span class="tag">${m.stationId}</span></td><td>${escapeHTML(m.title)}</td><td class="mono text-mute">${fmt.date(m.completedAt)}</td></tr>`).join('')}</tbody>
-      </table></div>
-    </div>` : ''}
+
+    ${View._maintSection(ar?'بانتظار التقييم — يحتاج موافقة مشرف الصيانة':'Awaiting Evaluation — Maintenance Supervisor approval needed', requested, 'requested')}
+    ${View._maintSection(ar?'تم التقييم — يحتاج بدء تنفيذ من المهندس':'Evaluated — Awaiting engineer start', evaluated, 'evaluated')}
+    ${View._maintSection(ar?'قيد التنفيذ':'In Progress', inProgress, 'in_progress')}
+    ${View._maintSection(ar?'منجزة وموثَّقة':'Completed & Verified', completed.slice(0,15), 'completed')}
+    ${rejected.length ? View._maintSection(ar?'طلبات مرفوضة':'Rejected Requests', rejected.slice(0,5), 'rejected') : ''}
   `;
+};
+
+View._maintSection = function(title, list, status) {
+  if (list.length === 0) return '';
+  const ar = State.lang === 'ar';
+  const priorityColors = {
+    critical: 'var(--rose)',
+    high: 'var(--amber)',
+    normal: 'var(--sky)',
+    low: 'var(--text-3)'
+  };
+  const priorityLabels = {
+    critical: ar?'حرج — يوقف فوراً':'Critical — stops now',
+    high: ar?'عالي':'High',
+    normal: ar?'عادي':'Normal',
+    low: ar?'منخفض':'Low'
+  };
+
+  return `<div class="card mb-2">
+    <div class="card-title">${escapeHTML(title)} (${list.length})</div>
+    <div style="overflow-x:auto"><table class="data">
+      <thead><tr>
+        <th>${ar?'الرقم':'#'}</th>
+        <th>${ar?'المحطة':'Station'}</th>
+        <th>${ar?'العطل':'Fault'}</th>
+        <th>${ar?'الأولوية':'Priority'}</th>
+        <th>${ar?'الطالب':'Requested by'}</th>
+        ${status !== 'requested' ? `<th>${ar?'الفني':'Tech'}</th>` : ''}
+        <th>${ar?'منذ':'Since'}</th>
+        <th>${ar?'الإجراء':'Action'}</th>
+      </tr></thead>
+      <tbody>${list.map(m => {
+        const reqr = Q.user(m.requestedBy);
+        const tech = m.assignedTo ? Q.user(m.assignedTo) : null;
+        const station = Q.station(m.stationId);
+        return `<tr>
+          <td class="mono"><b>${m.id}</b></td>
+          <td><span class="tag">${m.stationId}</span><div class="text-mute" style="font-size:10.5px">${escapeHTML(station ? (ar?station.name:station.nameEn) : '—')}</div></td>
+          <td>${escapeHTML(m.faultTitle||m.title||'—')}<div class="text-mute" style="font-size:11px">${escapeHTML((m.description||m.desc||'').substring(0,80))}${(m.description||m.desc||'').length>80?'...':''}</div></td>
+          <td><span class="badge-status" style="color:${priorityColors[m.priority]||'var(--text-3)'};border-color:${priorityColors[m.priority]||'var(--text-3)'}">${priorityLabels[m.priority]||m.priority}</span></td>
+          <td>${reqr?escapeHTML(ar?reqr.name:reqr.nameEn):'—'}</td>
+          ${status !== 'requested' ? `<td>${tech?escapeHTML(ar?tech.name:tech.nameEn):'<span class="text-mute">—</span>'}</td>` : ''}
+          <td class="mono text-mute" style="font-size:11px">${fmt.ago(m.requestedAt)}</td>
+          <td>${View._maintActions(m)}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+  </div>`;
+};
+
+View._maintActions = function(m) {
+  const ar = State.lang === 'ar';
+  const isMaintSup = State.user.dept === 'MAINT' && /مشرف|Supervisor/i.test(State.user.role||'');
+  const isMaint = State.user.dept === 'MAINT';
+  const isMgr = Perm.isManager();
+  const buttons = [];
+
+  if (m.status === 'requested') {
+    if (isMaintSup || isMgr) {
+      buttons.push(`<button class="btn btn-sm btn-primary" onclick="Action.evaluateMaint('${m.id}')">${ar?'تقييم':'Evaluate'}</button>`);
+      buttons.push(`<button class="btn btn-sm btn-secondary" onclick="Action.rejectMaint('${m.id}')" style="color:var(--rose)">${ar?'رفض':'Reject'}</button>`);
+    } else {
+      buttons.push(`<button class="btn btn-sm btn-secondary" onclick="Action.viewMaintDetails('${m.id}')">${ar?'تفاصيل':'View'}</button>`);
+    }
+  } else if (m.status === 'evaluated') {
+    if (isMaint || isMgr) {
+      buttons.push(`<button class="btn btn-sm btn-success" onclick="Action.startMaint('${m.id}')">${ar?'بدء التنفيذ':'Start Work'}</button>`);
+    }
+    buttons.push(`<button class="btn btn-sm btn-secondary" onclick="Action.viewMaintDetails('${m.id}')">${ar?'تفاصيل':'View'}</button>`);
+  } else if (m.status === 'in_progress') {
+    if (isMaint && (m.assignedTo === State.user.id || isMaintSup) || isMgr) {
+      buttons.push(`<button class="btn btn-sm btn-success" onclick="Action.finishMaint('${m.id}')">${ar?'إنهاء':'Complete'}</button>`);
+    }
+    buttons.push(`<button class="btn btn-sm btn-secondary" onclick="Action.viewMaintDetails('${m.id}')">${ar?'تفاصيل':'View'}</button>`);
+  } else if (m.status === 'completed') {
+    if (isMaintSup || isMgr) {
+      buttons.push(`<button class="btn btn-sm btn-primary" onclick="Action.verifyMaint('${m.id}')">${ar?'تحقق وإغلاق':'Verify & Close'}</button>`);
+    }
+    buttons.push(`<button class="btn btn-sm btn-secondary" onclick="Action.viewMaintDetails('${m.id}')">${ar?'تفاصيل':'View'}</button>`);
+  } else {
+    buttons.push(`<button class="btn btn-sm btn-secondary" onclick="Action.viewMaintDetails('${m.id}')">${ar?'تفاصيل':'View'}</button>`);
+  }
+  return buttons.join(' ');
 };
 
 // ─────── TRACEABILITY ───────
@@ -3433,59 +3610,519 @@ const Action = {
   },
 
   // ─────── REQUEST MAINTENANCE ───────
+  // ─────── MAINTENANCE WORKFLOW (4-stage) ───────
+  
+  // STAGE 1: Operator/Production identifies fault and submits request
   requestMaint(stationId) {
     const ar = State.lang === 'ar';
     App.closeModal();
-    const stationOpts = State.data.stations.map(s=>`<option value="${s.id}" ${s.id===stationId?'selected':''}>${s.code} — ${escapeHTML(ar?s.name:s.nameEn)}</option>`).join('');
+    const stationOpts = State.data.stations.map(s=>`<option value="${s.id}" ${s.id===stationId?'selected':''}>${s.code} — ${escapeHTML(ar?s.name:s.nameEn)} · ${s.status}</option>`).join('');
     const body = `
+      <div style="background:rgba(244,63,94,0.06);border:1px solid rgba(244,63,94,0.25);border-radius:9px;padding:11px;margin-bottom:14px;font-size:11.5px;color:var(--rose)">
+        🛠 <b>${ar?'طلب صيانة جديد':'New Maintenance Request'}</b>
+        <div style="margin-top:4px;color:var(--text-2)">${ar?'حدد العطل بدقة. مشرف الصيانة سيقيّم الأولوية ويُنشئ أمر صيانة.':'Describe the fault precisely. Maintenance supervisor will evaluate priority and create work order.'}</div>
+      </div>
       <div class="form-grid">
-        <div class="field"><label>${ar?'المحطة':'Station'} <span class="req">*</span></label><select id="mrStation">${stationOpts}</select></div>
-        <div class="form-row">
-          <div class="field"><label>${ar?'العنوان':'Title'} <span class="req">*</span></label><input id="mrTitle" placeholder="${ar?'مثال: عطل في وحدة التشخيص':'e.g. Sensor fault'}"></div>
-          <div class="field"><label>${ar?'الأولوية':'Priority'}</label><select id="mrPriority"><option value="low">low</option><option value="medium" selected>medium</option><option value="high">high</option></select></div>
+        <div class="field">
+          <label>${ar?'المحطة':'Station'} <span class="req">*</span></label>
+          <select id="mrStation">${stationOpts}</select>
         </div>
-        <div class="field"><label>${ar?'الوصف':'Description'}</label><textarea id="mrDesc"></textarea></div>
+        <div class="field">
+          <label>${ar?'وصف العطل (عنوان)':'Fault Title'} <span class="req">*</span></label>
+          <input id="mrTitle" placeholder="${ar?'مثال: صوت غير طبيعي من المحرك':'e.g. Unusual motor sound'}">
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'الأولوية المقترحة':'Suggested Priority'}</label>
+            <select id="mrPriority">
+              <option value="low">${ar?'منخفض — جدولة دورية':'Low — schedule maintenance'}</option>
+              <option value="normal" selected>${ar?'عادي — لا يوقف الإنتاج':'Normal — production continues'}</option>
+              <option value="high">${ar?'عالي — يتطلب تدخل قريب':'High — needs prompt attention'}</option>
+              <option value="critical">${ar?'حرج — يوقف المحطة فوراً':'Critical — stops station now'}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>${ar?'حالة المحطة':'Station Status'}</label>
+            <select id="mrStnStatus">
+              <option value="working">${ar?'تعمل لكن بمشاكل':'Working with issues'}</option>
+              <option value="degraded">${ar?'تعمل بأداء منخفض':'Reduced performance'}</option>
+              <option value="stopped">${ar?'متوقفة كلياً':'Completely stopped'}</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>${ar?'وصف تفصيلي للعطل':'Detailed Description'}</label>
+          <textarea id="mrDesc" rows="3" placeholder="${ar?'متى بدأ العطل؟ ما الأعراض؟ هل توقف الإنتاج؟':'When did the fault start? Symptoms? Has production stopped?'}"></textarea>
+        </div>
+        <div class="field">
+          <label>${ar?'الفحص الأولي (اختياري)':'Initial Check (Optional)'}</label>
+          <textarea id="mrCheck" rows="2" placeholder="${ar?'هل قمت بأي فحص أولي؟':'Any initial diagnostic checks performed?'}"></textarea>
+        </div>
+      </div>
+      <div style="background:rgba(245,158,11,0.05);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:9px;margin-top:8px;font-size:10.5px;color:var(--text-3)">
+        💡 ${ar?'الأولوية النهائية يحدّدها مشرف الصيانة بعد التقييم. الأولوية "حرج" توقف المحطة فوراً.':'Final priority will be set by the maintenance supervisor. "Critical" priority stops the station immediately.'}
       </div>
     `;
-    App.openModal(t('request_maint'), body,
+    App.openModal(ar?'طلب صيانة جديد':'New Maintenance Request', body,
       `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
-       <button class="btn btn-primary" onclick="Action.submitMaint()">${t('confirm')}</button>`);
+       <button class="btn btn-primary" onclick="Action.submitMaintRequest()">${ar?'تقديم الطلب':'Submit Request'}</button>`, true);
   },
-  submitMaint() {
+
+  submitMaintRequest() {
+    const ar = State.lang === 'ar';
     const stationId = document.getElementById('mrStation').value;
     const title = document.getElementById('mrTitle').value.trim();
     const priority = document.getElementById('mrPriority').value;
-    const desc = document.getElementById('mrDesc').value.trim();
-    if (!title) { toast(State.lang==='ar'?'العنوان مطلوب':'Title required', 'error'); return; }
-    const tech = Q.usersOf('MAINT')[0];
-    const id = 'MR-' + String(State.data.maintenance.length+1).padStart(3,'0');
-    State.data.maintenance.unshift({
-      id, stationId, requestedBy: State.user.id, assignedTo: tech?.id || null,
-      status: 'in_progress', priority, title, desc, requestedAt: now(),
-    });
-    // Optionally mark station as maintenance if high priority
-    if (priority === 'high') {
-      const s = Q.station(stationId);
-      if (s && s.status !== 'running') s.status = 'maintenance';
+    const stnStatus = document.getElementById('mrStnStatus').value;
+    const description = document.getElementById('mrDesc').value.trim();
+    const initialCheck = document.getElementById('mrCheck').value.trim();
+    if (!title) { toast(ar?'وصف العطل مطلوب':'Fault title required','error'); return; }
+
+    if (!State.data.maintenanceRequests) State.data.maintenanceRequests = [];
+    const id = 'MR-' + String(State.data.maintenanceRequests.length + 1).padStart(4, '0');
+    const req = {
+      id, stationId,
+      requestedBy: State.user.id,
+      requestedAt: now(),
+      faultTitle: title,
+      description,
+      initialCheck,
+      stationStatusAtRequest: stnStatus,
+      requestedPriority: priority,
+      priority, // can be changed by supervisor
+      status: 'requested',
+      history: [
+        { stage: 'requested', action: 'submit', by: State.user.id, ts: now(), notes: title }
+      ]
+    };
+    State.data.maintenanceRequests.unshift(req);
+
+    // Critical priority: stop station immediately
+    const station = Q.station(stationId);
+    if (station && priority === 'critical') {
+      station.status = 'maintenance';
+      station._maintRef = id;
+      Movements.add('err', `🛑 ${ar?'محطة متوقفة لطلب حرج':'Station stopped for critical request'} — ${stationId}`, { stationId, mrId: id });
+    } else if (station && stnStatus === 'stopped') {
+      // If user reports station as fully stopped, mark it as such
+      station.status = 'maintenance';
+      station._maintRef = id;
     }
-    Audit.log('request_maint', 'Maintenance', id, { stationId, priority });
-    Movements.add('warn', `${State.lang==='ar'?'طلب صيانة جديد':'New maintenance request'} — ${stationId}: ${title}`, { mrId: id });
+
+    Audit.log('request_maint', 'Maintenance', id, { stationId, priority, stnStatus });
+    Movements.add('warn', `🛠 ${ar?'طلب صيانة جديد':'New maintenance request'}: ${stationId} — ${title} [${priority}]`, { mrId: id });
     State.save();
-    App.closeModal(); toast(State.lang==='ar'?'تم تسجيل الطلب':'Request logged', 'success');
+    App.closeModal();
+    toast(ar?`✓ تم تقديم الطلب ${id}`:`✓ Request ${id} submitted`, 'success');
     App.goto('maintenance');
   },
-  completeMaint(id) {
-    if (!Perm.canAct('MAINT')) { toast(t('no_perm'), 'error'); return; }
-    const m = State.data.maintenance.find(x=>x.id===id);
+
+  // STAGE 2: Maintenance Supervisor evaluates the request
+  evaluateMaint(mrId) {
+    const ar = State.lang === 'ar';
+    const m = (State.data.maintenanceRequests||[]).find(x => x.id === mrId);
     if (!m) return;
-    m.status = 'completed'; m.completedAt = now(); m.completedBy = State.user.id;
-    const s = Q.station(m.stationId);
-    if (s && s.status === 'maintenance') s.status = 'idle';
-    Audit.log('complete_maint', 'Maintenance', id, {});
-    Movements.add('ok', `${State.lang==='ar'?'تم إنجاز صيانة':'Maintenance completed'} ${m.stationId}`, { mrId: id });
+    const isMaintSup = State.user.dept === 'MAINT' && /مشرف|Supervisor/i.test(State.user.role||'');
+    if (!isMaintSup && !Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
+
+    const reqr = Q.user(m.requestedBy);
+    const station = Q.station(m.stationId);
+    const techOpts = Q.usersOf('MAINT').map(u =>
+      `<option value="${u.id}">${escapeHTML(ar?u.name:u.nameEn)} ${/مشرف|Supervisor/i.test(u.role||'')?(ar?' (مشرف)':' (Sup)'):''}</option>`
+    ).join('');
+
+    const body = `
+      <div style="background:rgba(245,185,66,0.08);border:1px solid rgba(245,185,66,0.3);border-radius:9px;padding:12px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:8px">📋 ${ar?'تفاصيل الطلب':'Request Details'}</div>
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:12px">
+          <span class="text-mute">${ar?'الرقم:':'ID:'}</span><b class="mono">${m.id}</b>
+          <span class="text-mute">${ar?'المحطة:':'Station:'}</span><b>${m.stationId} — ${escapeHTML(station?(ar?station.name:station.nameEn):'')}</b>
+          <span class="text-mute">${ar?'العطل:':'Fault:'}</span><b>${escapeHTML(m.faultTitle)}</b>
+          <span class="text-mute">${ar?'الوصف:':'Description:'}</span><span>${escapeHTML(m.description||'—')}</span>
+          ${m.initialCheck?`<span class="text-mute">${ar?'الفحص الأولي:':'Initial Check:'}</span><span>${escapeHTML(m.initialCheck)}</span>`:''}
+          <span class="text-mute">${ar?'حالة المحطة:':'Station Status:'}</span><span>${m.stationStatusAtRequest}</span>
+          <span class="text-mute">${ar?'الطالب:':'Requested by:'}</span><span>${reqr?escapeHTML(ar?reqr.name:reqr.nameEn):'—'}</span>
+          <span class="text-mute">${ar?'الأولوية المقترحة:':'Suggested priority:'}</span><span><b style="color:var(--gold)">${m.requestedPriority}</b></span>
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'تأكيد/تعديل الأولوية':'Confirm/Set Priority'} <span class="req">*</span></label>
+            <select id="evPriority">
+              <option value="critical" ${m.priority==='critical'?'selected':''}>${ar?'حرج — يوقف المحطة فوراً':'Critical'}</option>
+              <option value="high" ${m.priority==='high'?'selected':''}>${ar?'عالي':'High'}</option>
+              <option value="normal" ${m.priority==='normal'?'selected':''}>${ar?'عادي':'Normal'}</option>
+              <option value="low" ${m.priority==='low'?'selected':''}>${ar?'منخفض':'Low'}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>${ar?'الفني المعيَّن':'Assigned Technician'} <span class="req">*</span></label>
+            <select id="evTech">${techOpts}</select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'النوع':'Type'}</label>
+            <select id="evType">
+              <option value="corrective">${ar?'تصحيحية':'Corrective'}</option>
+              <option value="preventive">${ar?'وقائية':'Preventive'}</option>
+              <option value="predictive">${ar?'تنبؤية':'Predictive'}</option>
+              <option value="emergency">${ar?'طارئة':'Emergency'}</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>${ar?'الوقت المقدَّر (ساعات)':'Est. Hours'}</label>
+            <input id="evHours" type="number" min="0" step="0.5" placeholder="2.5">
+          </div>
+        </div>
+        <div class="field">
+          <label>${ar?'تشخيص المشرف':'Supervisor Diagnosis'} <span class="req">*</span></label>
+          <textarea id="evDiagnosis" rows="2" placeholder="${ar?'ما هو السبب المحتمل؟ ماذا يحتاج الإصلاح؟':'Probable cause? What needs fixing?'}"></textarea>
+        </div>
+        <div class="field">
+          <label>${ar?'القطع/المواد المطلوبة (اختياري)':'Parts/Materials Needed (optional)'}</label>
+          <textarea id="evParts" rows="2"></textarea>
+        </div>
+      </div>
+    `;
+    App.openModal(`${ar?'تقييم طلب صيانة':'Evaluate Request'} — ${m.id}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.saveEvaluation('${mrId}')">${ar?'إنشاء أمر صيانة':'Create Work Order'}</button>`, true);
+  },
+
+  saveEvaluation(mrId) {
+    const ar = State.lang === 'ar';
+    const m = (State.data.maintenanceRequests||[]).find(x => x.id === mrId);
+    if (!m) return;
+    const get = (id) => document.getElementById(id).value.trim();
+    const priority = document.getElementById('evPriority').value;
+    const tech = document.getElementById('evTech').value;
+    const type = document.getElementById('evType').value;
+    const hours = parseFloat(document.getElementById('evHours').value) || 0;
+    const diagnosis = get('evDiagnosis');
+    const parts = get('evParts');
+    if (!diagnosis) { toast(ar?'التشخيص مطلوب':'Diagnosis required','error'); return; }
+
+    m.status = 'evaluated';
+    m.priority = priority;
+    m.assignedTo = tech;
+    m.maintenanceType = type;
+    m.estimatedHours = hours;
+    m.diagnosis = diagnosis;
+    m.partsNeeded = parts;
+    m.evaluatedBy = State.user.id;
+    m.evaluatedAt = now();
+    m.workOrderNumber = 'MWO-' + new Date().getFullYear() + '-' + String((State.data.maintenanceRequests||[]).filter(x=>x.workOrderNumber).length + 1).padStart(4,'0');
+    m.history.push({ stage: 'evaluated', action: 'evaluate', by: State.user.id, ts: now(), notes: `${priority} | ${diagnosis.substring(0,50)}` });
+
+    // Adjust station status based on priority
+    const station = Q.station(m.stationId);
+    if (station) {
+      if (priority === 'critical' || priority === 'high') {
+        if (station.status !== 'maintenance') {
+          station.status = 'maintenance';
+          station._maintRef = mrId;
+          Movements.add('warn', `🛑 ${ar?'المحطة متوقفة للصيانة':'Station stopped for maintenance'} — ${m.stationId}`, { stationId: m.stationId, mrId });
+        }
+      }
+      // normal/low: station stays running until "start work"
+    }
+
+    Audit.log('evaluate_maint', 'Maintenance', mrId, { priority, tech, wo: m.workOrderNumber });
+    Movements.add('info', `📋 ${ar?'تم تقييم':'Evaluated'} ${mrId} — ${m.workOrderNumber} (${priority})`, { mrId });
     State.save();
-    toast(State.lang==='ar'?'تم الإنجاز':'Completed', 'success');
+    App.closeModal();
+    toast(ar?`✓ ${m.workOrderNumber} جاهز للتنفيذ`:`✓ ${m.workOrderNumber} ready for work`, 'success');
     App.goto('maintenance');
+  },
+
+  // STAGE 3: Engineer starts the maintenance work
+  startMaint(mrId) {
+    const ar = State.lang === 'ar';
+    const m = (State.data.maintenanceRequests||[]).find(x => x.id === mrId);
+    if (!m) return;
+    if (State.user.dept !== 'MAINT' && !Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
+
+    m.status = 'in_progress';
+    m.startedAt = now();
+    m.startedBy = State.user.id;
+    if (!m.assignedTo) m.assignedTo = State.user.id;
+    m.history.push({ stage: 'in_progress', action: 'start', by: State.user.id, ts: now() });
+
+    // Now station MUST be in maintenance
+    const station = Q.station(m.stationId);
+    if (station && station.status !== 'maintenance') {
+      station.status = 'maintenance';
+      station._maintRef = mrId;
+    }
+
+    Audit.log('start_maint', 'Maintenance', mrId, {});
+    Movements.add('info', `▶ ${ar?'بدء صيانة':'Maintenance started'}: ${mrId} — ${m.stationId}`, { mrId });
+    State.save();
+    toast(ar?'بدأ التنفيذ':'Work started','success');
+    App.goto('maintenance');
+  },
+
+  // STAGE 4a: Engineer marks work complete (with documentation)
+  finishMaint(mrId) {
+    const ar = State.lang === 'ar';
+    const m = (State.data.maintenanceRequests||[]).find(x => x.id === mrId);
+    if (!m) return;
+    if (State.user.dept !== 'MAINT' && !Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
+
+    const body = `
+      <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.25);border-radius:9px;padding:11px;margin-bottom:14px;font-size:11.5px;color:var(--emerald)">
+        ✓ <b>${ar?'إنجاز الصيانة':'Complete Maintenance'}</b> — ${ar?'وثّق العمل المُنفَّذ. المشرف سيتحقق ثم يبلّغ الإنتاج.':'Document the work. Supervisor will verify then notify production.'}
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label>${ar?'العمل المُنفَّذ':'Work Performed'} <span class="req">*</span></label>
+          <textarea id="cmWork" rows="3" placeholder="${ar?'صف بالتفصيل ما تم إصلاحه':'Describe in detail what was repaired'}"></textarea>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>${ar?'القطع المستخدمة':'Parts Used'}</label>
+            <textarea id="cmParts" rows="2"></textarea>
+          </div>
+          <div class="field">
+            <label>${ar?'الوقت الفعلي (ساعات)':'Actual Hours'} <span class="req">*</span></label>
+            <input id="cmHours" type="number" min="0" step="0.5" value="${m.estimatedHours||1}">
+          </div>
+        </div>
+        <div class="field">
+          <label>${ar?'الاختبار والتحقق':'Testing & Verification'} <span class="req">*</span></label>
+          <textarea id="cmTest" rows="2" placeholder="${ar?'كيف تم اختبار الإصلاح؟ هل المحطة تعمل بشكل طبيعي؟':'How was repair tested? Station running normally?'}"></textarea>
+        </div>
+        <div class="field">
+          <label>${ar?'ملاحظات للمشرف':'Notes for Supervisor'}</label>
+          <textarea id="cmNotes" rows="2"></textarea>
+        </div>
+      </div>
+    `;
+    App.openModal(`${ar?'إنهاء الصيانة':'Complete Work'} — ${m.id}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-success" onclick="Action.saveFinishMaint('${mrId}')">${ar?'تم الإنجاز':'Mark Complete'}</button>`, true);
+  },
+
+  saveFinishMaint(mrId) {
+    const ar = State.lang === 'ar';
+    const m = (State.data.maintenanceRequests||[]).find(x => x.id === mrId);
+    if (!m) return;
+    const get = (id) => document.getElementById(id).value.trim();
+    const work = get('cmWork');
+    const parts = get('cmParts');
+    const hours = parseFloat(document.getElementById('cmHours').value) || 0;
+    const testing = get('cmTest');
+    const notes = get('cmNotes');
+    if (!work || !testing) { toast(ar?'العمل المُنفَّذ والاختبار مطلوبان':'Work and testing required','error'); return; }
+
+    m.status = 'completed';
+    m.workPerformed = work;
+    m.partsUsed = parts;
+    m.actualHours = hours;
+    m.testResults = testing;
+    m.completionNotes = notes;
+    m.completedAt = now();
+    m.completedBy = State.user.id;
+    m.history.push({ stage: 'completed', action: 'finish', by: State.user.id, ts: now(), notes: work.substring(0, 60) });
+
+    Audit.log('finish_maint', 'Maintenance', mrId, { hours });
+    Movements.add('ok', `✓ ${ar?'انتهت الصيانة':'Maintenance finished'}: ${mrId} — ${m.stationId} (${ar?'بانتظار تحقق المشرف':'awaiting verification'})`, { mrId });
+    State.save();
+    App.closeModal();
+    toast(ar?'تم الإنجاز — بانتظار تحقق المشرف':'Done — awaiting supervisor verification','success');
+    App.goto('maintenance');
+  },
+
+  // STAGE 4b: Supervisor verifies and notifies production
+  verifyMaint(mrId) {
+    const ar = State.lang === 'ar';
+    const m = (State.data.maintenanceRequests||[]).find(x => x.id === mrId);
+    if (!m) return;
+    const isMaintSup = State.user.dept === 'MAINT' && /مشرف|Supervisor/i.test(State.user.role||'');
+    if (!isMaintSup && !Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
+
+    const tech = m.completedBy ? Q.user(m.completedBy) : null;
+    const body = `
+      <div style="background:rgba(245,185,66,0.08);border:1px solid rgba(245,185,66,0.3);border-radius:9px;padding:12px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:8px">📋 ${ar?'مراجعة العمل':'Work Review'}</div>
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:12px">
+          <span class="text-mute">${ar?'الفني:':'Tech:'}</span><b>${tech?escapeHTML(ar?tech.name:tech.nameEn):'—'}</b>
+          <span class="text-mute">${ar?'العمل:':'Work:'}</span><span>${escapeHTML(m.workPerformed||'')}</span>
+          <span class="text-mute">${ar?'القطع:':'Parts:'}</span><span>${escapeHTML(m.partsUsed||'—')}</span>
+          <span class="text-mute">${ar?'الوقت:':'Hours:'}</span><span class="mono">${m.actualHours||0}</span>
+          <span class="text-mute">${ar?'الاختبار:':'Testing:'}</span><span>${escapeHTML(m.testResults||'')}</span>
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label>${ar?'حكم المشرف':'Supervisor Verdict'} <span class="req">*</span></label>
+          <select id="vmVerdict">
+            <option value="approved">${ar?'✓ مقبول — الإصلاح كامل':'✓ Approved — fix complete'}</option>
+            <option value="needs_rework">${ar?'⟲ يحتاج إعادة عمل':'⟲ Needs rework'}</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>${ar?'ملاحظات التحقق':'Verification Notes'}</label>
+          <textarea id="vmNotes" rows="3" placeholder="${ar?'أي ملاحظات على الإصلاح':'Any notes on the repair'}"></textarea>
+        </div>
+      </div>
+    `;
+    App.openModal(`${ar?'تحقق وإغلاق':'Verify & Close'} — ${m.id}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" onclick="Action.saveVerification('${mrId}')">${ar?'تأكيد':'Confirm'}</button>`, true);
+  },
+
+  saveVerification(mrId) {
+    const ar = State.lang === 'ar';
+    const m = (State.data.maintenanceRequests||[]).find(x => x.id === mrId);
+    if (!m) return;
+    const verdict = document.getElementById('vmVerdict').value;
+    const notes = document.getElementById('vmNotes').value.trim();
+
+    if (verdict === 'needs_rework') {
+      m.status = 'in_progress';
+      m.history.push({ stage: 'in_progress', action: 'rework_required', by: State.user.id, ts: now(), notes });
+      Audit.log('reject_completion', 'Maintenance', mrId, { notes });
+      Movements.add('warn', `↩ ${ar?'إعادة عمل':'Rework required'}: ${mrId}`, { mrId });
+      State.save();
+      App.closeModal();
+      toast(ar?'تم إرجاع للفني':'Sent back to technician','info');
+      App.goto('maintenance');
+      return;
+    }
+
+    // Approved — close everything
+    m.status = 'verified';
+    m.verifiedBy = State.user.id;
+    m.verifiedAt = now();
+    m.verificationNotes = notes;
+    m.productionNotified = true;
+    m.history.push({ stage: 'verified', action: 'verify', by: State.user.id, ts: now(), notes });
+
+    // Re-enable station
+    const station = Q.station(m.stationId);
+    if (station && station._maintRef === mrId) {
+      station.status = 'idle';
+      station._maintRef = null;
+      Movements.add('ok', `🟢 ${ar?'المحطة جاهزة للعمل':'Station ready'} — ${m.stationId}`, { stationId: m.stationId });
+    }
+
+    Audit.log('verify_maint', 'Maintenance', mrId, { notes });
+    Movements.add('ok', `✓ ${ar?'تم إغلاق الصيانة':'Maintenance closed'}: ${mrId} — ${ar?'الإنتاج بُلِّغ':'production notified'}`, { mrId });
+    State.save();
+    App.closeModal();
+    toast(ar?'✓ تم الإغلاق — المحطة جاهزة':'✓ Closed — station ready','success');
+    App.goto('maintenance');
+  },
+
+  // Reject a request before evaluation (supervisor decides it's not needed)
+  rejectMaint(mrId) {
+    const ar = State.lang === 'ar';
+    const m = (State.data.maintenanceRequests||[]).find(x => x.id === mrId);
+    if (!m) return;
+    const isMaintSup = State.user.dept === 'MAINT' && /مشرف|Supervisor/i.test(State.user.role||'');
+    if (!isMaintSup && !Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
+    const body = `
+      <div style="background:rgba(244,63,94,0.06);border:1px solid rgba(244,63,94,0.25);border-radius:9px;padding:11px;margin-bottom:14px;font-size:11.5px;color:var(--rose)">
+        ✕ <b>${ar?'رفض طلب الصيانة':'Reject Request'}</b>
+      </div>
+      <div class="field">
+        <label>${ar?'سبب الرفض':'Rejection Reason'} <span class="req">*</span></label>
+        <textarea id="rjReason" rows="3" placeholder="${ar?'مثال: ليس عطل، إساءة استخدام، طلب مكرر':'e.g. Not a fault, misuse, duplicate request'}"></textarea>
+      </div>
+    `;
+    App.openModal(`${ar?'رفض الطلب':'Reject'} — ${m.id}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-danger" onclick="Action.saveReject('${mrId}')">${ar?'تأكيد الرفض':'Confirm Reject'}</button>`, true);
+  },
+
+  saveReject(mrId) {
+    const ar = State.lang === 'ar';
+    const m = (State.data.maintenanceRequests||[]).find(x => x.id === mrId);
+    if (!m) return;
+    const reason = document.getElementById('rjReason').value.trim();
+    if (!reason) { toast(ar?'السبب مطلوب':'Reason required','error'); return; }
+    m.status = 'rejected';
+    m.rejectedBy = State.user.id;
+    m.rejectedAt = now();
+    m.rejectionReason = reason;
+    m.history.push({ stage: 'rejected', action: 'reject', by: State.user.id, ts: now(), notes: reason });
+
+    // If station was set to maintenance for this request, restore it
+    const station = Q.station(m.stationId);
+    if (station && station._maintRef === mrId) {
+      station.status = 'idle';
+      station._maintRef = null;
+    }
+    Audit.log('reject_maint', 'Maintenance', mrId, { reason });
+    Movements.add('warn', `✕ ${ar?'تم رفض طلب صيانة':'Maintenance request rejected'}: ${mrId}`, { mrId });
+    State.save();
+    App.closeModal();
+    toast(ar?'تم الرفض':'Rejected','info');
+    App.goto('maintenance');
+  },
+
+  // View full details of any maintenance request (read-only)
+  viewMaintDetails(mrId) {
+    const ar = State.lang === 'ar';
+    const m = (State.data.maintenanceRequests||[]).find(x => x.id === mrId);
+    if (!m) return;
+    const reqr = m.requestedBy ? Q.user(m.requestedBy) : null;
+    const evltr = m.evaluatedBy ? Q.user(m.evaluatedBy) : null;
+    const tech = m.assignedTo ? Q.user(m.assignedTo) : null;
+    const verifier = m.verifiedBy ? Q.user(m.verifiedBy) : null;
+    const station = Q.station(m.stationId);
+
+    const row = (label, val) => val ? `<div style="display:flex;gap:10px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:12px"><span class="text-mute" style="min-width:130px">${label}</span><span>${val}</span></div>` : '';
+
+    const body = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+        <div>
+          <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--gold)">📋 ${ar?'بيانات الطلب':'Request Info'}</div>
+          ${row(ar?'الرقم:':'ID:', `<b class="mono">${m.id}</b>`)}
+          ${row(ar?'الحالة:':'Status:', `<span class="badge-status">${m.status}</span>`)}
+          ${row(ar?'الأولوية:':'Priority:', `<b>${m.priority}</b>`)}
+          ${row(ar?'النوع:':'Type:', m.maintenanceType||'—')}
+          ${row(ar?'الـ WO:':'Work Order:', m.workOrderNumber?`<b class="mono">${m.workOrderNumber}</b>`:'—')}
+          ${row(ar?'المحطة:':'Station:', `<b>${m.stationId}</b> — ${escapeHTML(station?(ar?station.name:station.nameEn):'')}`)}
+          ${row(ar?'العطل:':'Fault:', `<b>${escapeHTML(m.faultTitle||'')}</b>`)}
+          ${row(ar?'الوصف:':'Description:', escapeHTML(m.description||'—'))}
+          ${row(ar?'الفحص الأولي:':'Initial Check:', escapeHTML(m.initialCheck||'—'))}
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--sky)">👥 ${ar?'الأطراف':'Parties'}</div>
+          ${row(ar?'الطالب:':'Requested by:', reqr?`${escapeHTML(ar?reqr.name:reqr.nameEn)} <span class="text-mute mono" style="font-size:10.5px">${fmt.date(m.requestedAt)}</span>`:'—')}
+          ${row(ar?'المُقيّم:':'Evaluated by:', evltr?`${escapeHTML(ar?evltr.name:evltr.nameEn)} <span class="text-mute mono" style="font-size:10.5px">${fmt.date(m.evaluatedAt)}</span>`:'—')}
+          ${row(ar?'الفني:':'Technician:', tech?escapeHTML(ar?tech.name:tech.nameEn):'—')}
+          ${row(ar?'بدء العمل:':'Started:', m.startedAt?fmt.date(m.startedAt):'—')}
+          ${row(ar?'أُنجِز:':'Completed:', m.completedAt?fmt.date(m.completedAt):'—')}
+          ${row(ar?'تحقَّق:':'Verified by:', verifier?`${escapeHTML(ar?verifier.name:verifier.nameEn)} <span class="text-mute mono" style="font-size:10.5px">${fmt.date(m.verifiedAt)}</span>`:'—')}
+        </div>
+      </div>
+
+      ${m.diagnosis ? `<div style="margin-top:14px"><div class="text-mute" style="font-size:11px;margin-bottom:4px">${ar?'تشخيص المشرف:':'Supervisor Diagnosis:'}</div><div style="font-size:12px;background:var(--glass-2);padding:10px;border-radius:6px">${escapeHTML(m.diagnosis)}</div></div>` : ''}
+      ${m.workPerformed ? `<div style="margin-top:14px"><div class="text-mute" style="font-size:11px;margin-bottom:4px">${ar?'العمل المُنفَّذ:':'Work Performed:'}</div><div style="font-size:12px;background:var(--glass-2);padding:10px;border-radius:6px">${escapeHTML(m.workPerformed)}</div></div>` : ''}
+      ${m.testResults ? `<div style="margin-top:14px"><div class="text-mute" style="font-size:11px;margin-bottom:4px">${ar?'الاختبار:':'Testing:'}</div><div style="font-size:12px;background:var(--glass-2);padding:10px;border-radius:6px">${escapeHTML(m.testResults)}</div></div>` : ''}
+      ${m.partsUsed ? `<div style="margin-top:14px"><div class="text-mute" style="font-size:11px;margin-bottom:4px">${ar?'القطع المستخدمة:':'Parts Used:'}</div><div style="font-size:12px;background:var(--glass-2);padding:10px;border-radius:6px">${escapeHTML(m.partsUsed)}</div></div>` : ''}
+      ${m.rejectionReason ? `<div style="margin-top:14px"><div style="font-size:11px;margin-bottom:4px;color:var(--rose)">${ar?'سبب الرفض:':'Rejection Reason:'}</div><div style="font-size:12px;background:rgba(244,63,94,0.08);padding:10px;border-radius:6px;border:1px solid rgba(244,63,94,0.2)">${escapeHTML(m.rejectionReason)}</div></div>` : ''}
+
+      <div style="margin-top:18px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:8px">⏱ ${ar?'سجل التغييرات':'History'}</div>
+        ${m.history.map(h => {
+          const u = Q.user(h.by);
+          return `<div style="display:flex;gap:10px;padding:5px 0;font-size:11.5px;border-bottom:1px solid rgba(255,255,255,0.04)">
+            <span class="text-mute mono" style="min-width:120px">${fmt.date(h.ts)}</span>
+            <span class="badge-status" style="min-width:100px">${h.stage}</span>
+            <span style="flex:1">${u?escapeHTML(ar?u.name:u.nameEn):'—'} — ${escapeHTML(h.notes||h.action)}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    `;
+
+    App.openModal(`${ar?'تفاصيل الصيانة':'Maintenance Details'} — ${m.id}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${ar?'إغلاق':'Close'}</button>`, true);
   },
 
   // ─────── ADMIN — USER CRUD ───────
@@ -3973,10 +4610,16 @@ const Action = {
     if (wh.items.length === 0) { toast(State.lang==='ar'?'لا توجد مواد — أضف أولاً':'No materials — add one first','error'); return; }
     const ar = State.lang === 'ar';
     const itemOpts = wh.items.map(i => `<option value="${i.sku}" ${presetSku===i.sku?'selected':''}>${escapeHTML(i.sku)} — ${escapeHTML(i.name)} (${i.unit})</option>`).join('');
+    const activeSuppliers = (State.data.suppliers||[]).filter(s => s.active !== false);
+    const supplierOpts = `<option value="">${ar?'-- اختر مورّد --':'-- Select supplier --'}</option>` +
+      activeSuppliers.map(s => `<option value="${escapeHTML(s.code)}">${escapeHTML(s.code)} — ${escapeHTML(ar?s.name:s.nameEn||s.name)}</option>`).join('');
+    const noSuppliersWarning = activeSuppliers.length === 0 ?
+      `<div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:9px;margin-bottom:10px;font-size:11.5px;color:var(--amber)">⚠ ${ar?'لا يوجد موردون مسجَّلون — أغلق هذي النافذة، اذهب لـ "الموردون" وأضف مورّد أولاً':'No suppliers registered — close this dialog, go to Suppliers and add one first'}</div>` : '';
     const body = `
       <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.25);border-radius:9px;padding:10px;margin-bottom:14px;font-size:11.5px;color:var(--emerald)">
         ↓ <b>${ar?'استلام شحنة جديدة':'Receive New Shipment'}</b> — ${ar?'يضيف الكمية للمخزون الحالي':'Adds quantity to current stock'}
       </div>
+      ${noSuppliersWarning}
       <div class="form-grid">
         <div class="field">
           <label>${ar?'المادة':'Material'} <span class="req">*</span></label>
@@ -3994,8 +4637,8 @@ const Action = {
         </div>
         <div class="form-row">
           <div class="field">
-            <label>${ar?'المورد':'Supplier'}</label>
-            <input id="rcSupplier" placeholder="${ar?'(اختياري)':'(optional)'}">
+            <label>${ar?'المورد':'Supplier'} ${activeSuppliers.length > 0 ? '<span class="req">*</span>' : ''}</label>
+            <select id="rcSupplier" ${activeSuppliers.length === 0 ? 'disabled' : ''}>${supplierOpts}</select>
           </div>
           <div class="field">
             <label>${ar?'تاريخ الاستلام':'Receipt Date'}</label>
@@ -4010,7 +4653,7 @@ const Action = {
     `;
     App.openModal(`${ar?'استلام شحنة':'Receive Stock'} — ${wh.code}`, body,
       `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
-       <button class="btn btn-primary" onclick="Action.saveReceive('${whId}')">${ar?'تسجيل الاستلام':'Save Receipt'}</button>`, true);
+       <button class="btn btn-primary" onclick="Action.saveReceive('${whId}')" ${activeSuppliers.length === 0 ? 'disabled' : ''}>${ar?'تسجيل الاستلام':'Save Receipt'}</button>`, true);
   },
 
   saveReceive(whId) {
@@ -4020,17 +4663,20 @@ const Action = {
     const sku = document.getElementById('rcSku').value;
     const qty = parseFloat(document.getElementById('rcQty').value);
     const ref = document.getElementById('rcRef').value.trim();
-    const supplier = document.getElementById('rcSupplier').value.trim();
+    const supplierCode = document.getElementById('rcSupplier').value.trim();
     const notes = document.getElementById('rcNotes').value.trim();
     const item = wh.items.find(i => i.sku === sku);
     if (!item) return;
     if (isNaN(qty) || qty <= 0) { toast(ar?'أدخل كمية موجبة':'Enter positive qty','error'); return; }
     if (!ref) { toast(ar?'رقم الفاتورة مطلوب':'Reference required','error'); return; }
+    const supplier = (State.data.suppliers||[]).find(s => s.code === supplierCode);
+    if (!supplier && (State.data.suppliers||[]).length > 0) { toast(ar?'اختر مورّد':'Select supplier','error'); return; }
+    const supplierLabel = supplier ? `${supplier.code} (${supplier.name})` : '';
 
     item.qty += qty;
-    Movements.addStock({ whId, sku, type: 'receive', qty, ref, notes: supplier ? `${supplier} | ${notes}` : notes });
-    Audit.log('receive_stock', 'Warehouse', `${whId}/${sku}`, { qty, ref, supplier });
-    Movements.add('ok', `↓ ${ar?'استلام':'Receive'}: ${wh.code}/${sku} +${fmt.num(qty)} ${item.unit} (${ref})`, { whId, sku, qty });
+    Movements.addStock({ whId, sku, type: 'receive', qty, ref, notes: supplierLabel ? `${supplierLabel} | ${notes}` : notes });
+    Audit.log('receive_stock', 'Warehouse', `${whId}/${sku}`, { qty, ref, supplier: supplierCode });
+    Movements.add('ok', `↓ ${ar?'استلام':'Receive'}: ${wh.code}/${sku} +${fmt.num(qty)} ${item.unit} (${ref})${supplier?` ← ${supplier.code}`:''}`, { whId, sku, qty });
     State.save();
     App.closeModal();
     toast(ar?`✓ تم الاستلام: +${fmt.num(qty)} ${item.unit}`:`✓ Received: +${fmt.num(qty)} ${item.unit}`, 'success');
@@ -4302,6 +4948,170 @@ const Action = {
     if (!Q.user(State.user.id)) { App.logout(); }
     else { App.renderSidebar(); App.goto('admin'); }
   },
+};
+
+Action.newSupplier = function() {
+  const ar = State.lang === 'ar';
+  if (!Perm.isManager() && State.user.dept !== 'RAW') { toast(t('no_perm'), 'error'); return; }
+  const categories = [
+    { v:'raw_material', l:ar?'مواد خام':'Raw Materials' },
+    { v:'consumable',   l:ar?'مواد استهلاكية':'Consumables' },
+    { v:'spare_part',   l:ar?'قطع غيار':'Spare Parts' },
+    { v:'packaging',    l:ar?'مواد تغليف':'Packaging' },
+    { v:'service',      l:ar?'خدمات':'Services' },
+  ];
+  const catOpts = categories.map(c => `<option value="${c.v}">${c.l}</option>`).join('');
+  const body = `
+    <div class="form-grid">
+      <div class="form-row">
+        <div class="field">
+          <label>${ar?'كود المورد':'Supplier Code'} <span class="req">*</span></label>
+          <input id="supCode" class="mono" placeholder="${ar?'مثال: SUP-001':'e.g. SUP-001'}" maxlength="20">
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">${ar?'فريد، حروف وأرقام فقط':'Unique, alphanumeric'}</div>
+        </div>
+        <div class="field">
+          <label>${ar?'الفئة':'Category'} <span class="req">*</span></label>
+          <select id="supCategory">${catOpts}</select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label>${ar?'الاسم بالعربي':'Name (AR)'} <span class="req">*</span></label>
+          <input id="supName" placeholder="${ar?'اسم الشركة':'Company name'}">
+        </div>
+        <div class="field">
+          <label>${ar?'الاسم بالإنجليزي':'Name (EN)'}</label>
+          <input id="supNameEn" placeholder="${ar?'(اختياري)':'(optional)'}">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label>${ar?'البلد':'Country'}</label>
+          <input id="supCountry" placeholder="${ar?'العراق / ألمانيا / ...':'Iraq / Germany / ...'}">
+        </div>
+        <div class="field">
+          <label>${ar?'المدينة':'City'}</label>
+          <input id="supCity">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label>${ar?'جهة الاتصال':'Contact Person'}</label>
+          <input id="supContact" placeholder="${ar?'الاسم الكامل':'Full name'}">
+        </div>
+        <div class="field">
+          <label>${ar?'المنصب':'Title'}</label>
+          <input id="supTitle">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label>${ar?'الإيميل':'Email'}</label>
+          <input id="supEmail" type="email" placeholder="contact@supplier.com">
+        </div>
+        <div class="field">
+          <label>${ar?'الهاتف':'Phone'}</label>
+          <input id="supPhone" type="tel" class="mono">
+        </div>
+      </div>
+      <div class="field">
+        <label>${ar?'العنوان':'Address'}</label>
+        <input id="supAddress">
+      </div>
+      <div class="field">
+        <label>${ar?'المواد التي يوفرها (مفصولة بفاصلة)':'Materials supplied (comma-separated)'}</label>
+        <input id="supMaterials" placeholder="${ar?'PC-COVER-A, GOLD-FOIL':'PC-COVER-A, GOLD-FOIL'}">
+      </div>
+      <div class="field">
+        <label>${ar?'ملاحظات':'Notes'}</label>
+        <textarea id="supNotes" rows="2"></textarea>
+      </div>
+    </div>
+  `;
+  App.openModal(ar?'مورد جديد':'New Supplier', body,
+    `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+     <button class="btn btn-primary" onclick="Action.saveNewSupplier()">${ar?'إضافة المورد':'Add Supplier'}</button>`, true);
+};
+
+Action.saveNewSupplier = function() {
+  const ar = State.lang === 'ar';
+  const get = (id) => (document.getElementById(id)?.value || '').trim();
+  const code = get('supCode').toUpperCase();
+  const name = get('supName');
+  if (!code || !name) { toast(ar?'الكود والاسم مطلوبان':'Code and name required','error'); return; }
+  if (!/^[A-Z0-9\-_]+$/.test(code)) { toast(ar?'الكود يحتوي رموز غير مسموحة':'Invalid code','error'); return; }
+  if (!State.data.suppliers) State.data.suppliers = [];
+  if (State.data.suppliers.some(s => s.code === code)) { toast(ar?'الكود موجود مسبقاً':'Code already exists','error'); return; }
+
+  const supplier = {
+    code, name,
+    nameEn: get('supNameEn') || name,
+    category: get('supCategory'),
+    country: get('supCountry'),
+    city: get('supCity'),
+    contactPerson: get('supContact'),
+    title: get('supTitle'),
+    email: get('supEmail'),
+    phone: get('supPhone'),
+    address: get('supAddress'),
+    materials: get('supMaterials').split(',').map(s=>s.trim()).filter(Boolean),
+    notes: get('supNotes'),
+    active: true,
+    createdAt: now(), createdBy: State.user.id,
+  };
+  State.data.suppliers.push(supplier);
+  Audit.log('add_supplier', 'Supplier', code, { name, category: supplier.category });
+  Movements.add('info', `${ar?'مورد جديد:':'New supplier:'} ${code} — ${name}`, { code });
+  State.save();
+  App.closeModal();
+  toast(ar?`✓ تم إضافة ${code}`:`✓ Added ${code}`, 'success');
+  View.suppliers();
+};
+
+Action.editSupplier = function(code) {
+  const ar = State.lang === 'ar';
+  if (!Perm.isManager() && State.user.dept !== 'RAW') { toast(t('no_perm'), 'error'); return; }
+  const s = (State.data.suppliers||[]).find(x => x.code === code);
+  if (!s) return;
+  const body = `
+    <div class="form-grid">
+      <div class="form-row">
+        <div class="field"><label>${ar?'الكود':'Code'}</label><input value="${escapeHTML(s.code)}" readonly class="mono"></div>
+        <div class="field"><label>${ar?'الحالة':'Status'}</label><select id="esActive"><option value="true" ${s.active!==false?'selected':''}>${ar?'نشط':'Active'}</option><option value="false" ${s.active===false?'selected':''}>${ar?'موقوف':'Inactive'}</option></select></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>${ar?'الاسم بالعربي':'Name (AR)'}</label><input id="esName" value="${escapeHTML(s.name||'')}"></div>
+        <div class="field"><label>${ar?'الاسم بالإنجليزي':'Name (EN)'}</label><input id="esNameEn" value="${escapeHTML(s.nameEn||'')}"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>${ar?'جهة الاتصال':'Contact'}</label><input id="esContact" value="${escapeHTML(s.contactPerson||'')}"></div>
+        <div class="field"><label>${ar?'الهاتف':'Phone'}</label><input id="esPhone" class="mono" value="${escapeHTML(s.phone||'')}"></div>
+      </div>
+      <div class="field"><label>${ar?'الإيميل':'Email'}</label><input id="esEmail" type="email" value="${escapeHTML(s.email||'')}"></div>
+      <div class="field"><label>${ar?'ملاحظات':'Notes'}</label><textarea id="esNotes" rows="2">${escapeHTML(s.notes||'')}</textarea></div>
+    </div>
+  `;
+  App.openModal(`${ar?'تعديل المورد':'Edit Supplier'} — ${escapeHTML(code)}`, body,
+    `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+     <button class="btn btn-primary" onclick="Action.saveEditSupplier('${code}')">${t('save')}</button>`, true);
+};
+
+Action.saveEditSupplier = function(code) {
+  const s = (State.data.suppliers||[]).find(x => x.code === code);
+  if (!s) return;
+  const get = (id) => document.getElementById(id).value.trim();
+  s.name = get('esName') || s.name;
+  s.nameEn = get('esNameEn') || s.nameEn;
+  s.contactPerson = get('esContact');
+  s.phone = get('esPhone');
+  s.email = get('esEmail');
+  s.notes = get('esNotes');
+  s.active = document.getElementById('esActive').value === 'true';
+  Audit.log('edit_supplier', 'Supplier', code, { fields: 'multiple' });
+  State.save();
+  App.closeModal();
+  toast(State.lang==='ar'?'تم الحفظ':'Saved', 'success');
+  View.suppliers();
 };
 
 // Initialize
