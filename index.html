@@ -1193,21 +1193,17 @@ const State = {
   },
   save() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(this.data));
-    // Debounced cloud sync of warehouse items (JSONB column)
-    // Avoids spamming Supabase with one update per item change
+    // Immediate cloud sync of warehouse items (JSONB column)
+    // Fire-and-forget — UI shouldn't block on network
     if (typeof Repo !== 'undefined' && Repo.warehouses) {
-      if (this._syncTimer) clearTimeout(this._syncTimer);
-      this._syncTimer = setTimeout(() => {
-        try {
-          this.data.warehouses.forEach(wh => {
-            // Only sync if cloud-tracked warehouses (skip if no items array)
-            if (Array.isArray(wh.items)) {
-              Repo.warehouses.upsertItems(wh.id, wh.items).catch(e => 
-                console.error('[State.save warehouse sync]', wh.id, e));
-            }
-          });
-        } catch (e) { console.error('[State.save sync]', e); }
-      }, 500);
+      try {
+        this.data.warehouses.forEach(wh => {
+          if (Array.isArray(wh.items)) {
+            Repo.warehouses.upsertItems(wh.id, wh.items).catch(e => 
+              console.error('[State.save warehouse sync]', wh.id, e));
+          }
+        });
+      } catch (e) { console.error('[State.save sync]', e); }
     }
   },
   reset() { localStorage.removeItem(STORAGE_KEY); this.data = Seed.generate(); this.migrate(); this.save(); }
@@ -1807,7 +1803,7 @@ const Repo = {
       return (data || []).map(r => ({
         id: r.id,
         code: r.code,
-        dept: r.dept,
+        dept: r.dept_id || r.dept,
         name: r.name_ar || r.name,
         nameEn: r.name_en || r.nameEn,
         managerId: r.manager_id || r.managerId,
@@ -7515,6 +7511,11 @@ const Action = {
     Audit.log('add_material', 'Warehouse', `${whId}/${sku}`, { name, unit, minQty });
     Movements.add('info', `${ar?'مادة جديدة في':'New material in'} ${wh.code}: ${sku} — ${name}`, { whId, sku });
     State.save();
+    // IMMEDIATE cloud sync (don't wait for debounce)
+    if (typeof Repo !== 'undefined' && Repo.warehouses) {
+      Repo.warehouses.upsertItems(wh.id, wh.items).catch(e => 
+        console.error('[Add material sync]', e));
+    }
     App.closeModal();
     toast(ar?`✓ تم إضافة ${sku}`:`✓ Added ${sku}`, 'success');
     View.warehouses();
@@ -7591,6 +7592,11 @@ const Action = {
     Audit.log('opening_balance', 'Warehouse', `${whId}/${sku}`, { qty, ref });
     Movements.add('info', `📦 ${ar?'رصيد افتتاحي':'Opening balance'}: ${wh.code}/${sku} = ${fmt.num(qty)} ${item.unit}`, { whId, sku, qty });
     State.save();
+    // IMMEDIATE cloud sync (don't wait for debounce — user might refresh page)
+    if (typeof Repo !== 'undefined' && Repo.warehouses) {
+      Repo.warehouses.upsertItems(wh.id, wh.items).catch(e => 
+        console.error('[Opening balance sync]', e));
+    }
     App.closeModal();
     toast(ar?`✓ تم تسجيل الرصيد: ${fmt.num(qty)} ${item.unit}`:`✓ Balance set: ${fmt.num(qty)} ${item.unit}`, 'success');
     View.warehouses();
