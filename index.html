@@ -1191,7 +1191,25 @@ const State = {
     if (!this.data.stageOverrides) this.data.stageOverrides = {};
     if (!this.data.meta) this.data.meta = { version: '1.0', initialized: now() };
   },
-  save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.data)); },
+  save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(this.data));
+    // Debounced cloud sync of warehouse items (JSONB column)
+    // Avoids spamming Supabase with one update per item change
+    if (typeof Repo !== 'undefined' && Repo.warehouses) {
+      if (this._syncTimer) clearTimeout(this._syncTimer);
+      this._syncTimer = setTimeout(() => {
+        try {
+          this.data.warehouses.forEach(wh => {
+            // Only sync if cloud-tracked warehouses (skip if no items array)
+            if (Array.isArray(wh.items)) {
+              Repo.warehouses.upsertItems(wh.id, wh.items).catch(e => 
+                console.error('[State.save warehouse sync]', wh.id, e));
+            }
+          });
+        } catch (e) { console.error('[State.save sync]', e); }
+      }, 500);
+    }
+  },
   reset() { localStorage.removeItem(STORAGE_KEY); this.data = Seed.generate(); this.migrate(); this.save(); }
 };
 
@@ -1777,6 +1795,37 @@ const Repo = {
   },
 
   // ═══════════════════════════════════════════════════════════════════
+  // WAREHOUSES — sync warehouse items to cloud (JSONB column)
+  // The items array is stored as JSONB in warehouses.items.
+  // ═══════════════════════════════════════════════════════════════════
+  warehouses: {
+    async list() {
+      if (!sb) return null;
+      const { data, error } = await sb.from('warehouses').select('*').order('id');
+      if (error) { Repo._err('warehouses.list', error); return null; }
+      Repo._ok('warehouses.list');
+      return (data || []).map(r => ({
+        id: r.id,
+        code: r.code,
+        dept: r.dept,
+        name: r.name_ar || r.name,
+        nameEn: r.name_en || r.nameEn,
+        managerId: r.manager_id || r.managerId,
+        items: r.items || [],
+      }));
+    },
+    async upsertItems(whId, items) {
+      if (!sb) return false;
+      const { error } = await sb.from('warehouses')
+        .update({ items: items || [] })
+        .eq('id', whId);
+      if (error) { Repo._err('warehouses.upsertItems', error); return false; }
+      Repo._ok('warehouses.upsertItems');
+      return true;
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
   // STOCK MOVEMENTS (immutable)
   // ═══════════════════════════════════════════════════════════════════
   stockMovements: {
@@ -1959,7 +2008,7 @@ const Repo = {
     const t0 = Date.now();
 
     try {
-      const [suppliers, maintenance, ccfg, cmembers, creviews, returns, stkMvs, bomMap, stConsume, seqs, scrapLog] = await Promise.all([
+      const [suppliers, maintenance, ccfg, cmembers, creviews, returns, stkMvs, bomMap, stConsume, seqs, scrapLog, whs] = await Promise.all([
         this.suppliers.list(),
         this.maintenance.list(),
         this.committee.getConfig(),
@@ -1971,6 +2020,7 @@ const Repo = {
         this.stationConsumption.list(1000),
         this.sequences.list(),
         this.scrapLog.list(1000),
+        this.warehouses.list(),
       ]);
 
       if (suppliers !== null) State.data.suppliers = suppliers;
@@ -1987,11 +2037,19 @@ const Repo = {
       if (creviews !== null) State.data.committeeReviews = creviews;
       if (returns !== null) State.data.returns = returns;
       if (stkMvs !== null) State.data.stockMovements = stkMvs;
-      // BOM: only override if cloud has data (preserves seed defaults on first run)
       if (bomMap !== null && Object.keys(bomMap).length > 0) State.data.bom = bomMap;
       if (stConsume !== null) State.data.stationConsumption = stConsume;
       if (seqs !== null) State.data.sequences = seqs;
       if (scrapLog !== null) State.data.scrapLog = scrapLog;
+      // Merge warehouse items from cloud (preserve seed structure, just update items array)
+      if (whs !== null) {
+        whs.forEach(cloudWh => {
+          const localWh = State.data.warehouses.find(w => w.id === cloudWh.id);
+          if (localWh) {
+            localWh.items = cloudWh.items || [];
+          }
+        });
+      }
 
       State.save();
       console.log(`[Repo] Bootstrap complete in ${Date.now() - t0}ms — `, {
@@ -2002,6 +2060,7 @@ const Repo = {
         stationConsumption: stConsume?.length,
         sequences: seqs?.length,
         scrapLog: scrapLog?.length,
+        warehouses: whs?.length,
       });
       return true;
     } catch (e) {
@@ -2055,6 +2114,17 @@ const Repo = {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sequences' }, async () => {
         const list = await this.sequences.list();
         if (list !== null) { State.data.sequences = list; State.save(); this._refreshIfShowing('quality'); }
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'warehouses' }, async () => {
+        const whs = await this.warehouses.list();
+        if (whs !== null) {
+          whs.forEach(cloudWh => {
+            const localWh = State.data.warehouses.find(w => w.id === cloudWh.id);
+            if (localWh) localWh.items = cloudWh.items || [];
+          });
+          State.save();
+          this._refreshIfShowing('warehouses');
+        }
       })
       .subscribe((status) => {
         console.log('[Repo] Realtime status:', status);
