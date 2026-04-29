@@ -1092,6 +1092,7 @@ body[dir="rtl"] .ticker-item { animation: slideInRtl 0.4s; }
           <div class="role" id="userRole">—</div>
         </div>
       </div>
+      <button class="btn btn-secondary btn-sm" onclick="Action.changeMyPassword()" title="تغيير كلمة السر" style="padding:6px 10px;font-size:12px">🔐</button>
       <button class="logout-btn" onclick="App.logout()">خروج</button>
     </div>
   </div>
@@ -7042,6 +7043,17 @@ const Action = {
           <div class="field"><label>${ar?'الدور بالعربي':'Role (AR)'}</label><input id="usrRole" value="${u?escapeHTML(u.role):''}"></div>
           <div class="field"><label>${ar?'الدور بالإنجليزي':'Role (EN)'}</label><input id="usrRoleEn" value="${u?escapeHTML(u.roleEn):''}"></div>
         </div>
+        ${!isNew ? `
+        <div style="background:rgba(245,185,66,0.06);border:1px solid rgba(245,185,66,0.2);border-radius:9px;padding:11px;margin-top:8px">
+          <div style="font-size:11.5px;color:var(--gold);font-weight:600;margin-bottom:6px">🔐 ${ar?'إدارة كلمة السر':'Password Management'}</div>
+          <button class="btn btn-secondary btn-sm" onclick="Action.resetUserPassword('${u.id}','${escapeHTML(u.name)}')">
+            ${ar?'إعادة تعيين كلمة السر':'Reset Password'}
+          </button>
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:6px">
+            ${ar?'سيتم إنشاء كلمة سر جديدة وإبلاغك بها':'A new password will be generated and shown to you'}
+          </div>
+        </div>
+        ` : ''}
       </div>
     `;
     App.openModal(isNew ? (ar?'مستخدم جديد':'New User') : (ar?'تعديل المستخدم':'Edit User'), body,
@@ -7141,6 +7153,177 @@ const Action = {
       if (btn) { btn.disabled = false; btn.textContent = t('save'); }
     }
   },
+
+  // ─── Reset password (Manager only) ───
+  // Generates a new random password and updates the user's Supabase Auth account.
+  // The new password is shown once to the manager (not stored).
+  resetUserPassword(userId, userName) {
+    if (!Perm.isManager()) { toast(t('no_perm'), 'error'); return; }
+    const ar = State.lang === 'ar';
+    const u = Q.user(userId);
+    if (!u) return;
+
+    // Generate a strong random temp password
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    let tempPwd = '';
+    for (let i = 0; i < 12; i++) tempPwd += chars[Math.floor(Math.random() * chars.length)];
+
+    const body = `
+      <div style="background:rgba(245,185,66,0.08);border:1px solid rgba(245,185,66,0.3);border-radius:9px;padding:12px;margin-bottom:12px">
+        <div style="color:var(--gold);font-weight:600;margin-bottom:6px">⚠️ ${ar?'إعادة تعيين كلمة السر':'Reset Password'}</div>
+        <div style="font-size:12px;color:var(--text-2)">
+          ${ar?'هذا سيستبدل كلمة سر':'This will replace the password for'} <b>${escapeHTML(userName)}</b> ${ar?'بكلمة سر جديدة. لن يستطيع المستخدم تسجيل الدخول بكلمة السر القديمة.':'with a new one. The old password will stop working.'}
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label>${ar?'كلمة السر الجديدة':'New Password'} <span class="req">*</span></label>
+          <div style="display:flex;gap:6px">
+            <input id="newPwd" type="text" value="${tempPwd}" minlength="8" style="flex:1" class="mono">
+            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('newPwd').value='${tempPwd}'" type="button">${ar?'استعادة':'Reset'}</button>
+          </div>
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:6px">
+            ${ar?'يمكنك تعديلها أو استخدام المُولَّدة. ٨ أحرف على الأقل.':'You can edit or use the generated one. Min 8 chars.'}
+          </div>
+        </div>
+        <div style="background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:7px;padding:10px;font-size:11px">
+          <b style="color:var(--sky)">📧 ${ar?'بعد الحفظ:':'After saving:'}</b>
+          <ul style="margin:4px 0 0 16px;color:var(--text-2)">
+            <li>${ar?'سيتم عرض كلمة السر الجديدة لك (مرة واحدة فقط)':'The new password will be shown to you (one time only)'}</li>
+            <li>${ar?'انسخها وأبلغ الموظف بها':'Copy it and share with the employee'}</li>
+            <li>${ar?'لا تُحفَظ كلمة السر في النظام لأسباب أمنية':'Password is not stored in the system for security'}</li>
+          </ul>
+        </div>
+      </div>
+    `;
+    App.openModal(`🔐 ${ar?'إعادة تعيين كلمة السر':'Reset Password'} — ${escapeHTML(userName)}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" id="resetPwdBtn" onclick="Action.confirmResetPassword('${userId}')">${ar?'تأكيد إعادة التعيين':'Confirm Reset'}</button>`, true);
+  },
+
+  async confirmResetPassword(userId) {
+    if (!Perm.isManager()) return;
+    const ar = State.lang === 'ar';
+    const u = Q.user(userId);
+    if (!u) return;
+    const newPwd = document.getElementById('newPwd').value.trim();
+
+    if (!newPwd || newPwd.length < 8) {
+      toast(ar?'كلمة السر يجب أن تكون ٨ أحرف على الأقل':'Password must be at least 8 chars','error');
+      return;
+    }
+
+    const btn = document.getElementById('resetPwdBtn');
+    if (btn) { btn.disabled = true; btn.textContent = ar?'جاري التحديث...':'Updating...'; }
+
+    try {
+      // Call the Edge Function to reset password (admin operation)
+      // The Edge Function uses service_role key to update Supabase Auth
+      const { data, error } = await sb.functions.invoke('admin-reset-password', {
+        body: { userId: u.email, newPassword: newPwd }
+      });
+
+      if (error) {
+        toast(ar?`فشل التحديث: ${error.message}`:`Failed: ${error.message}`,'error');
+        if (btn) { btn.disabled = false; btn.textContent = ar?'تأكيد إعادة التعيين':'Confirm Reset'; }
+        return;
+      }
+
+      Audit.log('reset_password', 'User', u.id, { byManager: State.user.id });
+      App.closeModal();
+
+      // Show the password to manager (one time)
+      const showBody = `
+        <div style="text-align:center;padding:8px">
+          <div style="font-size:48px;margin-bottom:8px">✓</div>
+          <div style="font-weight:600;margin-bottom:12px;color:var(--emerald)">
+            ${ar?'تم إعادة تعيين كلمة السر بنجاح':'Password reset successfully'}
+          </div>
+          <div style="background:rgba(245,185,66,0.1);border:1px solid rgba(245,185,66,0.3);border-radius:9px;padding:14px;margin:12px 0">
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:6px">${ar?'كلمة السر الجديدة:':'New password:'}</div>
+            <div class="mono" style="font-size:18px;font-weight:700;color:var(--gold);user-select:all;letter-spacing:1px">${escapeHTML(newPwd)}</div>
+          </div>
+          <div style="font-size:11.5px;color:var(--rose)">
+            ⚠️ ${ar?'انسخها الآن — لن تُعرض مرة أخرى':'Copy now — will not be shown again'}
+          </div>
+        </div>
+      `;
+      App.openModal(`🔐 ${ar?'كلمة السر الجديدة':'New Password'}`, showBody,
+        `<button class="btn btn-primary" onclick="navigator.clipboard.writeText('${newPwd}');toast('${ar?'تم النسخ ✓':'Copied ✓'}','success')">${ar?'نسخ':'Copy'}</button>
+         <button class="btn btn-secondary" onclick="App.closeModal()">${ar?'إغلاق':'Close'}</button>`, true);
+    } catch (e) {
+      toast(ar?`خطأ: ${e.message}`:`Error: ${e.message}`,'error');
+      if (btn) { btn.disabled = false; btn.textContent = ar?'تأكيد إعادة التعيين':'Confirm Reset'; }
+    }
+  },
+
+  // ─── User changes own password ───
+  changeMyPassword() {
+    const ar = State.lang === 'ar';
+    const body = `
+      <div class="form-grid">
+        <div class="field">
+          <label>${ar?'كلمة السر الحالية':'Current Password'} <span class="req">*</span></label>
+          <input id="curPwd" type="password" autocomplete="current-password">
+        </div>
+        <div class="field">
+          <label>${ar?'كلمة السر الجديدة':'New Password'} <span class="req">*</span></label>
+          <input id="newPwd1" type="password" minlength="8" autocomplete="new-password">
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">${ar?'٨ أحرف على الأقل':'Min 8 characters'}</div>
+        </div>
+        <div class="field">
+          <label>${ar?'تأكيد كلمة السر الجديدة':'Confirm New Password'} <span class="req">*</span></label>
+          <input id="newPwd2" type="password" minlength="8" autocomplete="new-password">
+        </div>
+      </div>
+    `;
+    App.openModal(`🔐 ${ar?'تغيير كلمة السر':'Change My Password'}`, body,
+      `<button class="btn btn-secondary" onclick="App.closeModal()">${t('cancel')}</button>
+       <button class="btn btn-primary" id="chgPwdBtn" onclick="Action.confirmChangeMyPassword()">${ar?'تغيير':'Change'}</button>`, true);
+  },
+
+  async confirmChangeMyPassword() {
+    const ar = State.lang === 'ar';
+    const cur = document.getElementById('curPwd').value;
+    const new1 = document.getElementById('newPwd1').value;
+    const new2 = document.getElementById('newPwd2').value;
+
+    if (!cur || !new1 || !new2) { toast(ar?'املأ كل الحقول':'Fill all fields','error'); return; }
+    if (new1.length < 8) { toast(ar?'كلمة السر يجب أن تكون ٨ أحرف على الأقل':'Min 8 chars','error'); return; }
+    if (new1 !== new2) { toast(ar?'كلمتا السر غير متطابقتين':"Passwords don't match",'error'); return; }
+    if (new1 === cur) { toast(ar?'كلمة السر الجديدة يجب أن تختلف عن الحالية':'New must differ from current','error'); return; }
+
+    const btn = document.getElementById('chgPwdBtn');
+    if (btn) { btn.disabled = true; btn.textContent = ar?'جاري التغيير...':'Changing...'; }
+
+    try {
+      // Verify current password by trying to sign in with it
+      const { error: verifyErr } = await sb.auth.signInWithPassword({
+        email: State.user.email, password: cur
+      });
+      if (verifyErr) {
+        toast(ar?'كلمة السر الحالية غير صحيحة':'Current password incorrect','error');
+        if (btn) { btn.disabled = false; btn.textContent = ar?'تغيير':'Change'; }
+        return;
+      }
+
+      // Update to new password
+      const { error: updateErr } = await sb.auth.updateUser({ password: new1 });
+      if (updateErr) {
+        toast(ar?`فشل التغيير: ${updateErr.message}`:`Failed: ${updateErr.message}`,'error');
+        if (btn) { btn.disabled = false; btn.textContent = ar?'تغيير':'Change'; }
+        return;
+      }
+
+      Audit.log('change_own_password', 'User', State.user.id, {});
+      App.closeModal();
+      toast(ar?'✓ تم تغيير كلمة السر':'✓ Password changed','success');
+    } catch (e) {
+      toast(ar?`خطأ: ${e.message}`:`Error: ${e.message}`,'error');
+      if (btn) { btn.disabled = false; btn.textContent = ar?'تغيير':'Change'; }
+    }
+  },
+
   deleteUser(id) {
     if (!Perm.isManager()) return;
     const u = Q.user(id);
