@@ -1184,12 +1184,35 @@ const State = {
   },
   // Forward-compatible migration so older saves get new fields
   migrate() {
-    if (!this.data.departments) {
-      // Deep copy DEPTS into mutable storage
+    if (!this.data.departments || typeof this.data.departments !== 'object' || Array.isArray(this.data.departments)) {
+      // Deep copy DEPTS into mutable storage (DEPTS is an object map)
       this.data.departments = JSON.parse(JSON.stringify(DEPTS));
     }
     if (!this.data.stageOverrides) this.data.stageOverrides = {};
     if (!this.data.meta) this.data.meta = { version: '1.0', initialized: now() };
+    // Ensure all required collections exist (handles legacy localStorage)
+    if (!Array.isArray(this.data.workOrders)) this.data.workOrders = [];
+    if (!Array.isArray(this.data.warehouses)) this.data.warehouses = [];
+    if (!Array.isArray(this.data.users)) this.data.users = [];
+    if (!Array.isArray(this.data.stations)) this.data.stations = [];
+    if (!Array.isArray(this.data.suppliers)) this.data.suppliers = [];
+    if (!Array.isArray(this.data.movements)) this.data.movements = [];
+    if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
+    if (!Array.isArray(this.data.maintenance)) this.data.maintenance = [];
+    if (!Array.isArray(this.data.maintenanceRequests)) this.data.maintenanceRequests = [];
+    if (!Array.isArray(this.data.returns)) this.data.returns = [];
+    if (!Array.isArray(this.data.audit)) this.data.audit = [];
+    if (!Array.isArray(this.data.sequences)) this.data.sequences = [];
+    if (!Array.isArray(this.data.scrapLog)) this.data.scrapLog = [];
+    if (!Array.isArray(this.data.stationConsumption)) this.data.stationConsumption = [];
+    if (!Array.isArray(this.data.committeeReviews)) this.data.committeeReviews = [];
+    if (!this.data.bom || typeof this.data.bom !== 'object') this.data.bom = {};
+    if (!this.data.committee) this.data.committee = { members: [], requiredApprovals: 3, enabled: false };
+    if (!this.data.seqDefaults) this.data.seqDefaults = { batchSize: 1000, baseSerial: 1001 };
+    // Ensure each warehouse has items array
+    this.data.warehouses.forEach(wh => {
+      if (!Array.isArray(wh.items)) wh.items = [];
+    });
   },
   save() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(this.data));
@@ -1458,6 +1481,9 @@ const Seed = {
       // Each: { id, woId, startSerial, endSerial, qty, status, mocPassed, mocFailed,
       //         packagingStatus, packagedQty, createdAt, mocBy, mocAt, packagedBy, packagedAt }
       sequences: [],
+      // Phase 2.3: Scrap log — every scrap event with material accounting
+      // Each: { id, woId, stationId, scrapQty, materials, totalRecovered, totalLost, ts, by, sequenceId? }
+      scrapLog: [],
       // Phase 2.2: Default batch size for new sequences (configurable from settings)
       seqDefaults: {
         batchSize: 1000,
