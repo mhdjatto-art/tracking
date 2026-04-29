@@ -1174,13 +1174,15 @@ const I18N = {
 };
 
 const State = {
-  data: null, route: 'dashboard', user: null, lang: 'ar', liveTimer: null,
+  data: null, route: 'dashboard', user: null, lang: 'ar', liveTimer: null, _bootstrapping: false,
   load() {
+    this._bootstrapping = true;
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) { try { this.data = JSON.parse(raw); } catch(e) { this.data = Seed.generate(); } }
     else { this.data = Seed.generate(); }
     this.migrate();
     this.save();
+    this._bootstrapping = false;
   },
   // Forward-compatible migration so older saves get new fields
   migrate() {
@@ -1217,7 +1219,8 @@ const State = {
   save() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(this.data));
     // Immediate cloud sync of warehouse items (JSONB column)
-    // Fire-and-forget — UI shouldn't block on network
+    // Skip during bootstrap to avoid overwriting cloud data with empty local data
+    if (this._bootstrapping) return;
     if (typeof Repo !== 'undefined' && Repo.warehouses) {
       try {
         this.data.warehouses.forEach(wh => {
@@ -2028,6 +2031,7 @@ const Repo = {
     }
     console.log('[Repo] Bootstrapping from cloud...');
     const t0 = Date.now();
+    State._bootstrapping = true;  // Prevent State.save from pushing local data to cloud during bootstrap
 
     try {
       const [suppliers, maintenance, ccfg, cmembers, creviews, returns, stkMvs, bomMap, stConsume, seqs, scrapLog, whs] = await Promise.all([
@@ -2073,7 +2077,8 @@ const Repo = {
         });
       }
 
-      State.save();
+      // Note: State.save() is at the end of try block (after _bootstrapping=false)
+      // so it can sync to cloud properly.
       console.log(`[Repo] Bootstrap complete in ${Date.now() - t0}ms — `, {
         suppliers: suppliers?.length, maintenance: maintenance?.length,
         committeeMembers: cmembers?.length, committeeReviews: creviews?.length,
@@ -2084,9 +2089,14 @@ const Repo = {
         scrapLog: scrapLog?.length,
         warehouses: whs?.length,
       });
+      // Now save to localStorage with the cloud data merged in.
+      // Re-enable cloud sync — user actions from now on will push to cloud.
+      State._bootstrapping = false;
+      State.save();
       return true;
     } catch (e) {
       console.error('[Repo] Bootstrap failed:', e);
+      State._bootstrapping = false;
       return false;
     }
   },
@@ -3313,10 +3323,10 @@ const App = {
         if (ok) {
           // Subscribe to realtime updates from other users
           Repo.subscribeAll();
-          // Refresh current view with fresh data
-          if (State.currentView) {
-            try { App.goto(State.currentView); } catch(e) {}
-          }
+          // Refresh current view with fresh data from cloud
+          // State.route holds the active view name (set by goto())
+          const route = State.route || 'dashboard';
+          try { App.goto(route); } catch(e) { console.error('[App] post-bootstrap render failed:', e); }
         } else {
           console.warn('[App] Cloud bootstrap failed — running on local cache');
         }
